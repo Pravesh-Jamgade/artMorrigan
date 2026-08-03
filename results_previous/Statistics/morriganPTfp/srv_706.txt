@@ -1,0 +1,142 @@
+Initialize SIGNATURE TABLE
+ST_SET: 1
+ST_WAY: 256
+ST_TAG_BIT: 16
+ST_TAG_MASK: ffff
+
+Initialize PATTERN TABLE
+PT_SET: 512
+PT_WAY: 4
+SIG_DELTA_BIT: 7
+C_SIG_BIT: 4
+C_DELTA_BIT: 4
+
+Initialize PREFETCH FILTER
+FILTER_SET: 1024
+
+*** ChampSim Multicore Out-of-Order Simulator ***
+
+Warmup Instructions: 50000000
+Simulation Instructions: 100000000
+Number of CPUs: 1
+LLC sets: 2048
+LLC ways: 16
+Off-chip DRAM Size: 4096 MB Channels: 1 Width: 64-bit Data Rate: 3200 MT/s
+
+CPU 0 runs /home/ubuntu/morrigan_paper_original/traces/srv_706.champsimtrace.xz
+CPU 0 STLB -- Morrigan I-TLB Prefetcher
+CPU 0 L1I next line prefetcher
+CPU 0 L1D next line prefetcher
+Heartbeat CPU 0 instructions: 10000003 cycles: 4989049 heartbeat IPC: 2.00439 cumulative IPC: 2.00439 (Simulation time: 0 hr 0 min 18 sec) 
+Heartbeat CPU 0 instructions: 20000000 cycles: 9983184 heartbeat IPC: 2.00235 cumulative IPC: 2.00337 (Simulation time: 0 hr 0 min 35 sec) 
+Heartbeat CPU 0 instructions: 30000001 cycles: 14976955 heartbeat IPC: 2.00249 cumulative IPC: 2.00308 (Simulation time: 0 hr 0 min 53 sec) 
+Heartbeat CPU 0 instructions: 40000001 cycles: 19965296 heartbeat IPC: 2.00467 cumulative IPC: 2.00348 (Simulation time: 0 hr 1 min 11 sec) 
+Heartbeat CPU 0 instructions: 50000001 cycles: 24958938 heartbeat IPC: 2.00255 cumulative IPC: 2.00329 (Simulation time: 0 hr 1 min 29 sec) 
+
+Warmup complete CPU 0 instructions: 50000001 cycles: 24958938 (Simulation time: 0 hr 1 min 29 sec) 
+
+Heartbeat CPU 0 instructions: 60000000 cycles: 40900712 heartbeat IPC: 0.627283 cumulative IPC: 0.627283 (Simulation time: 0 hr 1 min 54 sec) 
+Heartbeat CPU 0 instructions: 70000000 cycles: 57382799 heartbeat IPC: 0.606719 cumulative IPC: 0.61683 (Simulation time: 0 hr 2 min 19 sec) 
+Heartbeat CPU 0 instructions: 80000001 cycles: 77265340 heartbeat IPC: 0.502954 cumulative IPC: 0.573544 (Simulation time: 0 hr 2 min 55 sec) 
+Heartbeat CPU 0 instructions: 90000003 cycles: 99701819 heartbeat IPC: 0.445703 cumulative IPC: 0.535168 (Simulation time: 0 hr 3 min 45 sec) 
+*** Reached end of trace for Core: 0 Repeating trace: /home/ubuntu/morrigan_paper_original/traces/srv_706.champsimtrace.xz
+Heartbeat CPU 0 instructions: 100000000 cycles: 115628413 heartbeat IPC: 0.62788 cumulative IPC: 0.551453 (Simulation time: 0 hr 4 min 9 sec) 
+Heartbeat CPU 0 instructions: 110000000 cycles: 131484925 heartbeat IPC: 0.630656 cumulative IPC: 0.563243 (Simulation time: 0 hr 4 min 33 sec) 
+Heartbeat CPU 0 instructions: 120000000 cycles: 147746795 heartbeat IPC: 0.614935 cumulative IPC: 0.570089 (Simulation time: 0 hr 4 min 57 sec) 
+Heartbeat CPU 0 instructions: 130000000 cycles: 163959307 heartbeat IPC: 0.616808 cumulative IPC: 0.575538 (Simulation time: 0 hr 5 min 21 sec) 
+Heartbeat CPU 0 instructions: 140000000 cycles: 179981983 heartbeat IPC: 0.624115 cumulative IPC: 0.580559 (Simulation time: 0 hr 5 min 45 sec) 
+Heartbeat CPU 0 instructions: 150000000 cycles: 196142529 heartbeat IPC: 0.618791 cumulative IPC: 0.584168 (Simulation time: 0 hr 6 min 9 sec) 
+Finished CPU 0 instructions: 100000003 cycles: 171183594 cumulative IPC: 0.584168 (Simulation time: 0 hr 6 min 9 sec) 
+
+ChampSim completed all CPUs
+
+Region of Interest Statistics
+
+CPU 0 cumulative IPC: 0.584168 instructions: 100000003 cycles: 171183594
+L1D TOTAL     ACCESS:   45567010  HIT:   39731985  MISS:    5835025
+L1D LOAD      ACCESS:   18267418  HIT:   15436249  MISS:    2831169
+L1D RFO       ACCESS:    9483904  HIT:    9229158  MISS:     254746
+L1D PREFETCH  ACCESS:   17815688  HIT:   15066578  MISS:    2749110
+L1D WRITEBACK ACCESS:          0  HIT:          0  MISS:          0
+L1D PREFETCH  REQUESTED:   28102847  ISSUED:   27726879  USEFUL:     412499  USELESS:    2849303
+L1D AVERAGE MISS LATENCY: 21.2241 cycles
+L1I TOTAL     ACCESS:   28539448  HIT:   25690757  MISS:    2848691
+L1I LOAD      ACCESS:   27353815  HIT:   25527140  MISS:    1826675
+L1I RFO       ACCESS:          0  HIT:          0  MISS:          0
+L1I PREFETCH  ACCESS:    1185633  HIT:     163617  MISS:    1022016
+L1I WRITEBACK ACCESS:          0  HIT:          0  MISS:          0
+L1I PREFETCH  REQUESTED:    3618428  ISSUED:    3618428  USEFUL:    1141298  USELESS:     576901
+L1I AVERAGE MISS LATENCY: 23.0929 cycles
+L2C TOTAL     ACCESS:   11603199  HIT:    9168380  MISS:    2434819
+L2C LOAD      ACCESS:    4108940  HIT:    3199003  MISS:     909937
+L2C RFO       ACCESS:     248388  HIT:     117585  MISS:     130803
+L2C PREFETCH  ACCESS:    6683256  HIT:    5289517  MISS:    1393739
+L2C WRITEBACK ACCESS:     562615  HIT:     562275  MISS:        340
+L2C PREFETCH  REQUESTED:   12919593  ISSUED:   12919593  USEFUL:     179855  USELESS:    1785111
+L2C AVERAGE MISS LATENCY: 38.6262 cycles
+ITLB TOTAL     ACCESS:   23508741  HIT:   23254510  MISS:     254231
+ITLB LOAD      ACCESS:   23508741  HIT:   23254510  MISS:     254231
+ITLB RFO       ACCESS:          0  HIT:          0  MISS:          0
+ITLB PREFETCH  ACCESS:          0  HIT:          0  MISS:          0
+ITLB WRITEBACK ACCESS:          0  HIT:          0  MISS:          0
+ITLB PREFETCH  REQUESTED:          0  ISSUED:          0  USEFUL:          0  USELESS:          0
+ITLB AVERAGE MISS LATENCY: 27.3461 cycles
+DTLB TOTAL     ACCESS:   24403922  HIT:   22314131  MISS:    2089791
+DTLB LOAD      ACCESS:   17108992  HIT:   15084065  MISS:    2024927
+DTLB RFO       ACCESS:    7294930  HIT:    7230066  MISS:      64864
+DTLB PREFETCH  ACCESS:          0  HIT:          0  MISS:          0
+DTLB WRITEBACK ACCESS:          0  HIT:          0  MISS:          0
+DTLB PREFETCH  REQUESTED:          0  ISSUED:          0  USEFUL:          0  USELESS:          0
+DTLB AVERAGE MISS LATENCY: 17.2048 cycles
+STLB TOTAL     ACCESS:    2344022  HIT:    2159486  MISS:     184536
+STLB LOAD      ACCESS:    2279158  HIT:    2106007  MISS:     173151
+STLB RFO       ACCESS:      64864  HIT:      53479  MISS:      11385
+STLB PREFETCH  ACCESS:          0  HIT:          0  MISS:          0
+STLB WRITEBACK ACCESS:          0  HIT:          0  MISS:          0
+STLB PREFETCH  REQUESTED:    1077146  ISSUED:     419294  USEFUL:          0  USELESS:          0
+STLB AVERAGE MISS LATENCY: 98.2844 cycles
+LLC TOTAL     ACCESS:    5340005  HIT:    4953476  MISS:     386529
+LLC LOAD      ACCESS:     908747  HIT:     834071  MISS:      74676
+LLC RFO       ACCESS:     130795  HIT:      86440  MISS:      44355
+LLC PREFETCH  ACCESS:    4013804  HIT:    3747064  MISS:     266740
+LLC WRITEBACK ACCESS:     286659  HIT:     285901  MISS:        758
+LLC PREFETCH  REQUESTED:          0  ISSUED:          0  USEFUL:      69733  USELESS:     261128
+LLC AVERAGE MISS LATENCY: 148.723 cycles
+Major fault: 0 Minor fault: 6200
+CPU 0 L1I next line prefetcher final stats
+CPU 0 L1D next line prefetcher final stats
+
+*******************************************
+CPU 0 STLB -- Morrigan final stats
+*******************************************
+
+-------------------------------------------
+D-STLB MISSES: 108291
+I-STLB MISSES: 76245
+-------------------------------------------
+
+-------------------------------------------
+PQ hits: 58444
+PQ misses: 17801
+-------------------------------------------
+
+DRAM Statistics
+ CHANNEL 0
+ RQ ROW_BUFFER_HIT:      88355  ROW_BUFFER_MISS:     297413
+ DBUS_CONGESTED:     119174
+ WQ ROW_BUFFER_HIT:      14794  ROW_BUFFER_MISS:      86473  FULL:          0
+
+ AVG_CONGESTED_CYCLE: 5
+
+CPU 0 Branch Prediction Accuracy: 99.5024% MPKI: 1.00995 Average ROB Occupancy at Mispredict: 22.6387
+
+Branch types
+NOT_BRANCH: 99723359 99.7234%
+BRANCH_DIRECT_JUMP: 51583 0.051583%
+BRANCH_INDIRECT: 224192 0.224192%
+BRANCH_CONDITIONAL: 355 0.000355%
+BRANCH_DIRECT_CALL: 0 0%
+BRANCH_INDIRECT_CALL: 0 0%
+BRANCH_RETURN: 0 0%
+BRANCH_OTHER: 521 0.000521%
+

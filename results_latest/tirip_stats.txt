@@ -1,0 +1,1534 @@
+################ CONFIG: morriganPT_tage264fp_tage2 ################
+################ CONFIG: morriganPT_tage2fp_tage2 ################
+=== srv_128 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 107024
+T-IRIP predictions : 62298
+T-IRIP correct     : 50602
+IRIP  predictions  : 21374
+T-IRIP contribution: 58.2094 %
+T-IRIP accuracy    : 81.2257 %
+T-IRIP installs    : 52007
+T-IRIP evictions   : 48935
+T-IRIP alloc blocked: 1605
+T-IRIP u resets    : 0
+Installs per miss  : 0.485938
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 33506  correct: 30602  acc: 91.3329 %  installs: 43403
+  H4  preds: 16254  correct: 11747  acc: 72.2714 %  installs: 4072
+  H8  preds: 12538  correct: 8253  acc: 65.8239 %  installs: 4532
+=========================
+=== srv_12 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 143623
+T-IRIP predictions : 83572
+T-IRIP correct     : 70687
+IRIP  predictions  : 26781
+T-IRIP contribution: 58.1885 %
+T-IRIP accuracy    : 84.5822 %
+T-IRIP installs    : 67494
+T-IRIP evictions   : 64422
+T-IRIP alloc blocked: 2754
+T-IRIP u resets    : 1
+Installs per miss  : 0.469939
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 43917  correct: 40592  acc: 92.4289 %  installs: 57766
+  H4  preds: 20189  correct: 15899  acc: 78.7508 %  installs: 5313
+  H8  preds: 19466  correct: 14196  acc: 72.9272 %  installs: 4415
+=========================
+=== srv_194 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 108380
+T-IRIP predictions : 55302
+T-IRIP correct     : 44777
+IRIP  predictions  : 23097
+T-IRIP contribution: 51.026 %
+T-IRIP accuracy    : 80.9681 %
+T-IRIP installs    : 59783
+T-IRIP evictions   : 56715
+T-IRIP alloc blocked: 1208
+T-IRIP u resets    : 0
+Installs per miss  : 0.551605
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 30878  correct: 28058  acc: 90.8673 %  installs: 52086
+  H4  preds: 14051  correct: 10101  acc: 71.8881 %  installs: 3663
+  H8  preds: 10373  correct: 6618  acc: 63.8003 %  installs: 4034
+=========================
+=== srv_207 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 136916
+T-IRIP predictions : 75789
+T-IRIP correct     : 63914
+IRIP  predictions  : 27846
+T-IRIP contribution: 55.3544 %
+T-IRIP accuracy    : 84.3315 %
+T-IRIP installs    : 68328
+T-IRIP evictions   : 65257
+T-IRIP alloc blocked: 2213
+T-IRIP u resets    : 1
+Installs per miss  : 0.499051
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39481  correct: 36193  acc: 91.6719 %  installs: 59325
+  H4  preds: 19172  correct: 15119  acc: 78.8598 %  installs: 4826
+  H8  preds: 17136  correct: 12602  acc: 73.5411 %  installs: 4177
+=========================
+=== srv_21 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 119045
+T-IRIP predictions : 65675
+T-IRIP correct     : 53683
+IRIP  predictions  : 24272
+T-IRIP contribution: 55.1682 %
+T-IRIP accuracy    : 81.7404 %
+T-IRIP installs    : 61066
+T-IRIP evictions   : 57995
+T-IRIP alloc blocked: 1790
+T-IRIP u resets    : 0
+Installs per miss  : 0.512966
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 34926  correct: 31830  acc: 91.1355 %  installs: 51921
+  H4  preds: 17787  correct: 13067  acc: 73.4638 %  installs: 4322
+  H8  preds: 12962  correct: 8786  acc: 67.7827 %  installs: 4823
+=========================
+=== srv_222 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 125638
+T-IRIP predictions : 71728
+T-IRIP correct     : 58957
+IRIP  predictions  : 27324
+T-IRIP contribution: 57.091 %
+T-IRIP accuracy    : 82.1952 %
+T-IRIP installs    : 62067
+T-IRIP evictions   : 58995
+T-IRIP alloc blocked: 2408
+T-IRIP u resets    : 0
+Installs per miss  : 0.494015
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 38505  correct: 34848  acc: 90.5025 %  installs: 51876
+  H4  preds: 18127  correct: 13479  acc: 74.3587 %  installs: 5462
+  H8  preds: 15096  correct: 10630  acc: 70.416 %  installs: 4729
+=========================
+=== srv_225 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 124749
+T-IRIP predictions : 74987
+T-IRIP correct     : 60704
+IRIP  predictions  : 24839
+T-IRIP contribution: 60.1103 %
+T-IRIP accuracy    : 80.9527 %
+T-IRIP installs    : 58643
+T-IRIP evictions   : 55571
+T-IRIP alloc blocked: 2061
+T-IRIP u resets    : 0
+Installs per miss  : 0.470088
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39684  correct: 36139  acc: 91.0669 %  installs: 48108
+  H4  preds: 20274  correct: 14769  acc: 72.847 %  installs: 4952
+  H8  preds: 15029  correct: 9796  acc: 65.1807 %  installs: 5583
+=========================
+=== srv_255 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 122804
+T-IRIP predictions : 73282
+T-IRIP correct     : 59351
+IRIP  predictions  : 26087
+T-IRIP contribution: 59.674 %
+T-IRIP accuracy    : 80.9899 %
+T-IRIP installs    : 58145
+T-IRIP evictions   : 55074
+T-IRIP alloc blocked: 1885
+T-IRIP u resets    : 0
+Installs per miss  : 0.473478
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39074  correct: 35669  acc: 91.2858 %  installs: 47973
+  H4  preds: 19378  correct: 14042  acc: 72.4636 %  installs: 4729
+  H8  preds: 14830  correct: 9640  acc: 65.0034 %  installs: 5443
+=========================
+=== srv_259 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 130991
+T-IRIP predictions : 77910
+T-IRIP correct     : 64623
+IRIP  predictions  : 26790
+T-IRIP contribution: 59.4774 %
+T-IRIP accuracy    : 82.9457 %
+T-IRIP installs    : 61167
+T-IRIP evictions   : 58095
+T-IRIP alloc blocked: 2681
+T-IRIP u resets    : 0
+Installs per miss  : 0.466956
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 41844  correct: 38099  acc: 91.0501 %  installs: 50941
+  H4  preds: 19289  correct: 14762  acc: 76.5307 %  installs: 5526
+  H8  preds: 16777  correct: 11762  acc: 70.1079 %  installs: 4700
+=========================
+=== srv_276 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 125867
+T-IRIP predictions : 67695
+T-IRIP correct     : 56996
+IRIP  predictions  : 22915
+T-IRIP contribution: 53.783 %
+T-IRIP accuracy    : 84.1953 %
+T-IRIP installs    : 64577
+T-IRIP evictions   : 61507
+T-IRIP alloc blocked: 1640
+T-IRIP u resets    : 0
+Installs per miss  : 0.513057
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 38351  correct: 35857  acc: 93.4969 %  installs: 56777
+  H4  preds: 14948  correct: 10926  acc: 73.0934 %  installs: 3756
+  H8  preds: 14396  correct: 10213  acc: 70.9433 %  installs: 4044
+=========================
+=== srv_287 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 112833
+T-IRIP predictions : 60620
+T-IRIP correct     : 49521
+IRIP  predictions  : 23349
+T-IRIP contribution: 53.7254 %
+T-IRIP accuracy    : 81.6909 %
+T-IRIP installs    : 59372
+T-IRIP evictions   : 56303
+T-IRIP alloc blocked: 1389
+T-IRIP u resets    : 0
+Installs per miss  : 0.526194
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 33343  correct: 30589  acc: 91.7404 %  installs: 51083
+  H4  preds: 15671  correct: 11164  acc: 71.2399 %  installs: 3725
+  H8  preds: 11606  correct: 7768  acc: 66.9309 %  installs: 4564
+=========================
+=== srv_32 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 124856
+T-IRIP predictions : 73915
+T-IRIP correct     : 60299
+IRIP  predictions  : 25369
+T-IRIP contribution: 59.2002 %
+T-IRIP accuracy    : 81.5788 %
+T-IRIP installs    : 59174
+T-IRIP evictions   : 56102
+T-IRIP alloc blocked: 2127
+T-IRIP u resets    : 0
+Installs per miss  : 0.473938
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39501  correct: 36206  acc: 91.6584 %  installs: 49168
+  H4  preds: 19251  correct: 14170  acc: 73.6066 %  installs: 4854
+  H8  preds: 15163  correct: 9923  acc: 65.4422 %  installs: 5152
+=========================
+=== srv_364 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 121809
+T-IRIP predictions : 74414
+T-IRIP correct     : 60558
+IRIP  predictions  : 25049
+T-IRIP contribution: 61.0907 %
+T-IRIP accuracy    : 81.3798 %
+T-IRIP installs    : 55739
+T-IRIP evictions   : 52668
+T-IRIP alloc blocked: 2117
+T-IRIP u resets    : 0
+Installs per miss  : 0.457593
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 40301  correct: 37018  acc: 91.8538 %  installs: 45659
+  H4  preds: 19263  correct: 14047  acc: 72.9222 %  installs: 4784
+  H8  preds: 14850  correct: 9493  acc: 63.9259 %  installs: 5296
+=========================
+=== srv_408 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 118426
+T-IRIP predictions : 69289
+T-IRIP correct     : 57783
+IRIP  predictions  : 23586
+T-IRIP contribution: 58.5083 %
+T-IRIP accuracy    : 83.3942 %
+T-IRIP installs    : 56316
+T-IRIP evictions   : 53246
+T-IRIP alloc blocked: 2198
+T-IRIP u resets    : 0
+Installs per miss  : 0.475537
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 37982  correct: 34942  acc: 91.9962 %  installs: 47305
+  H4  preds: 17143  correct: 12902  acc: 75.261 %  installs: 4608
+  H8  preds: 14164  correct: 9939  acc: 70.1709 %  installs: 4403
+=========================
+=== srv_41 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126290
+T-IRIP predictions : 75905
+T-IRIP correct     : 63259
+IRIP  predictions  : 25850
+T-IRIP contribution: 60.1037 %
+T-IRIP accuracy    : 83.3397 %
+T-IRIP installs    : 58051
+T-IRIP evictions   : 54980
+T-IRIP alloc blocked: 2535
+T-IRIP u resets    : 0
+Installs per miss  : 0.459664
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 40394  correct: 37104  acc: 91.8552 %  installs: 48290
+  H4  preds: 18847  correct: 14309  acc: 75.9219 %  installs: 5102
+  H8  preds: 16664  correct: 11846  acc: 71.0874 %  installs: 4659
+=========================
+=== srv_426 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 116536
+T-IRIP predictions : 63124
+T-IRIP correct     : 50297
+IRIP  predictions  : 24955
+T-IRIP contribution: 54.167 %
+T-IRIP accuracy    : 79.6797 %
+T-IRIP installs    : 61824
+T-IRIP evictions   : 58753
+T-IRIP alloc blocked: 1640
+T-IRIP u resets    : 0
+Installs per miss  : 0.530514
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 34233  correct: 30901  acc: 90.2667 %  installs: 52004
+  H4  preds: 16808  correct: 11649  acc: 69.3063 %  installs: 4582
+  H8  preds: 12083  correct: 7747  acc: 64.1149 %  installs: 5238
+=========================
+=== srv_442 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 127491
+T-IRIP predictions : 71908
+T-IRIP correct     : 58648
+IRIP  predictions  : 30171
+T-IRIP contribution: 56.4024 %
+T-IRIP accuracy    : 81.5598 %
+T-IRIP installs    : 63965
+T-IRIP evictions   : 60893
+T-IRIP alloc blocked: 2360
+T-IRIP u resets    : 0
+Installs per miss  : 0.501722
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 38137  correct: 34359  acc: 90.0936 %  installs: 53587
+  H4  preds: 18456  correct: 13723  acc: 74.3552 %  installs: 5540
+  H8  preds: 15315  correct: 10566  acc: 68.9912 %  installs: 4838
+=========================
+=== srv_48 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 124203
+T-IRIP predictions : 73524
+T-IRIP correct     : 60560
+IRIP  predictions  : 27321
+T-IRIP contribution: 59.1966 %
+T-IRIP accuracy    : 82.3677 %
+T-IRIP installs    : 58835
+T-IRIP evictions   : 55763
+T-IRIP alloc blocked: 2183
+T-IRIP u resets    : 0
+Installs per miss  : 0.4737
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39979  correct: 36340  acc: 90.8977 %  installs: 48774
+  H4  preds: 17640  correct: 13034  acc: 73.8889 %  installs: 5352
+  H8  preds: 15905  correct: 11186  acc: 70.3301 %  installs: 4709
+=========================
+=== srv_495 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126592
+T-IRIP predictions : 75191
+T-IRIP correct     : 61007
+IRIP  predictions  : 26733
+T-IRIP contribution: 59.3963 %
+T-IRIP accuracy    : 81.136 %
+T-IRIP installs    : 60043
+T-IRIP evictions   : 56971
+T-IRIP alloc blocked: 2093
+T-IRIP u resets    : 0
+Installs per miss  : 0.474303
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39964  correct: 36477  acc: 91.2746 %  installs: 49699
+  H4  preds: 19869  correct: 14577  acc: 73.3655 %  installs: 4934
+  H8  preds: 15358  correct: 9953  acc: 64.8066 %  installs: 5410
+=========================
+=== srv_504 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 121954
+T-IRIP predictions : 69272
+T-IRIP correct     : 57156
+IRIP  predictions  : 27083
+T-IRIP contribution: 56.8017 %
+T-IRIP accuracy    : 82.5095 %
+T-IRIP installs    : 60257
+T-IRIP evictions   : 57185
+T-IRIP alloc blocked: 2419
+T-IRIP u resets    : 0
+Installs per miss  : 0.494096
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 36986  correct: 33673  acc: 91.0426 %  installs: 50611
+  H4  preds: 17295  correct: 12906  acc: 74.6227 %  installs: 5161
+  H8  preds: 14991  correct: 10577  acc: 70.5557 %  installs: 4485
+=========================
+=== srv_526 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 100257
+T-IRIP predictions : 66310
+T-IRIP correct     : 52884
+IRIP  predictions  : 19868
+T-IRIP contribution: 66.14 %
+T-IRIP accuracy    : 79.7527 %
+T-IRIP installs    : 42205
+T-IRIP evictions   : 39135
+T-IRIP alloc blocked: 1689
+T-IRIP u resets    : 0
+Installs per miss  : 0.420968
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 35217  correct: 31997  acc: 90.8567 %  installs: 32521
+  H4  preds: 17138  correct: 11990  acc: 69.9615 %  installs: 4493
+  H8  preds: 13955  correct: 8897  acc: 63.7549 %  installs: 5191
+=========================
+=== srv_537 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 130451
+T-IRIP predictions : 76779
+T-IRIP correct     : 64095
+IRIP  predictions  : 24779
+T-IRIP contribution: 58.8566 %
+T-IRIP accuracy    : 83.4799 %
+T-IRIP installs    : 61334
+T-IRIP evictions   : 58262
+T-IRIP alloc blocked: 2536
+T-IRIP u resets    : 0
+Installs per miss  : 0.470169
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 41913  correct: 38656  acc: 92.2291 %  installs: 51537
+  H4  preds: 18352  correct: 13781  acc: 75.0926 %  installs: 5154
+  H8  preds: 16514  correct: 11658  acc: 70.5946 %  installs: 4643
+=========================
+=== srv_540 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 134426
+T-IRIP predictions : 79746
+T-IRIP correct     : 67351
+IRIP  predictions  : 26826
+T-IRIP contribution: 59.3233 %
+T-IRIP accuracy    : 84.4569 %
+T-IRIP installs    : 62139
+T-IRIP evictions   : 59067
+T-IRIP alloc blocked: 2884
+T-IRIP u resets    : 0
+Installs per miss  : 0.462254
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 42319  correct: 38904  acc: 91.9303 %  installs: 52363
+  H4  preds: 19691  correct: 15435  acc: 78.3861 %  installs: 5377
+  H8  preds: 17736  correct: 13012  acc: 73.3649 %  installs: 4399
+=========================
+=== srv_551 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 114494
+T-IRIP predictions : 64781
+T-IRIP correct     : 52064
+IRIP  predictions  : 25188
+T-IRIP contribution: 56.5803 %
+T-IRIP accuracy    : 80.3692 %
+T-IRIP installs    : 57796
+T-IRIP evictions   : 54725
+T-IRIP alloc blocked: 1625
+T-IRIP u resets    : 0
+Installs per miss  : 0.504795
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 34651  correct: 31381  acc: 90.563 %  installs: 48353
+  H4  preds: 17254  correct: 12349  acc: 71.5718 %  installs: 4452
+  H8  preds: 12876  correct: 8334  acc: 64.7251 %  installs: 4991
+=========================
+=== srv_575 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 85350
+T-IRIP predictions : 46896
+T-IRIP correct     : 38244
+IRIP  predictions  : 16432
+T-IRIP contribution: 54.9455 %
+T-IRIP accuracy    : 81.5507 %
+T-IRIP installs    : 43963
+T-IRIP evictions   : 40896
+T-IRIP alloc blocked: 1361
+T-IRIP u resets    : 0
+Installs per miss  : 0.515091
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 26370  correct: 23882  acc: 90.565 %  installs: 37276
+  H4  preds: 10998  correct: 7918  acc: 71.9949 %  installs: 3535
+  H8  preds: 9528  correct: 6444  acc: 67.6322 %  installs: 3152
+=========================
+=== srv_582 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 125070
+T-IRIP predictions : 76085
+T-IRIP correct     : 61665
+IRIP  predictions  : 24994
+T-IRIP contribution: 60.8339 %
+T-IRIP accuracy    : 81.0475 %
+T-IRIP installs    : 57703
+T-IRIP evictions   : 54631
+T-IRIP alloc blocked: 2213
+T-IRIP u resets    : 0
+Installs per miss  : 0.461366
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 40420  correct: 37022  acc: 91.5933 %  installs: 47128
+  H4  preds: 19874  correct: 14433  acc: 72.6225 %  installs: 5010
+  H8  preds: 15791  correct: 10210  acc: 64.6571 %  installs: 5565
+=========================
+=== srv_617 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 122778
+T-IRIP predictions : 70709
+T-IRIP correct     : 58390
+IRIP  predictions  : 25422
+T-IRIP contribution: 57.5909 %
+T-IRIP accuracy    : 82.5779 %
+T-IRIP installs    : 59697
+T-IRIP evictions   : 56627
+T-IRIP alloc blocked: 2257
+T-IRIP u resets    : 0
+Installs per miss  : 0.486219
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 38258  correct: 34852  acc: 91.0973 %  installs: 50223
+  H4  preds: 17460  correct: 13072  acc: 74.8683 %  installs: 5009
+  H8  preds: 14991  correct: 10466  acc: 69.8152 %  installs: 4465
+=========================
+=== srv_61 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 125596
+T-IRIP predictions : 75206
+T-IRIP correct     : 61248
+IRIP  predictions  : 25596
+T-IRIP contribution: 59.8793 %
+T-IRIP accuracy    : 81.4403 %
+T-IRIP installs    : 58870
+T-IRIP evictions   : 55798
+T-IRIP alloc blocked: 2053
+T-IRIP u resets    : 0
+Installs per miss  : 0.468725
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 40163  correct: 36689  acc: 91.3502 %  installs: 48743
+  H4  preds: 19564  correct: 14415  acc: 73.6813 %  installs: 4847
+  H8  preds: 15479  correct: 10144  acc: 65.5339 %  installs: 5280
+=========================
+=== srv_641 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 123319
+T-IRIP predictions : 73045
+T-IRIP correct     : 59273
+IRIP  predictions  : 24821
+T-IRIP contribution: 59.2326 %
+T-IRIP accuracy    : 81.1459 %
+T-IRIP installs    : 58661
+T-IRIP evictions   : 55589
+T-IRIP alloc blocked: 2091
+T-IRIP u resets    : 0
+Installs per miss  : 0.475685
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 38374  correct: 34965  acc: 91.1164 %  installs: 48559
+  H4  preds: 19757  correct: 14651  acc: 74.156 %  installs: 4872
+  H8  preds: 14914  correct: 9657  acc: 64.7512 %  installs: 5230
+=========================
+=== srv_669 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 117893
+T-IRIP predictions : 68119
+T-IRIP correct     : 56551
+IRIP  predictions  : 22511
+T-IRIP contribution: 57.7804 %
+T-IRIP accuracy    : 83.018 %
+T-IRIP installs    : 56730
+T-IRIP evictions   : 53661
+T-IRIP alloc blocked: 1923
+T-IRIP u resets    : 0
+Installs per miss  : 0.481199
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 37293  correct: 34333  acc: 92.0629 %  installs: 48104
+  H4  preds: 15719  correct: 11620  acc: 73.9233 %  installs: 4473
+  H8  preds: 15107  correct: 10598  acc: 70.1529 %  installs: 4153
+=========================
+=== srv_702 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126454
+T-IRIP predictions : 70589
+T-IRIP correct     : 57488
+IRIP  predictions  : 27437
+T-IRIP contribution: 55.8219 %
+T-IRIP accuracy    : 81.4405 %
+T-IRIP installs    : 64374
+T-IRIP evictions   : 61302
+T-IRIP alloc blocked: 1844
+T-IRIP u resets    : 0
+Installs per miss  : 0.50907
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 38391  correct: 34732  acc: 90.4691 %  installs: 54284
+  H4  preds: 17559  correct: 12618  acc: 71.8606 %  installs: 5067
+  H8  preds: 14639  correct: 10138  acc: 69.2534 %  installs: 5023
+=========================
+=== srv_706 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 118865
+T-IRIP predictions : 68920
+T-IRIP correct     : 55711
+IRIP  predictions  : 25476
+T-IRIP contribution: 57.9817 %
+T-IRIP accuracy    : 80.8343 %
+T-IRIP installs    : 58381
+T-IRIP evictions   : 55310
+T-IRIP alloc blocked: 1531
+T-IRIP u resets    : 0
+Installs per miss  : 0.491154
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 36623  correct: 33213  acc: 90.6889 %  installs: 48689
+  H4  preds: 18402  correct: 13275  acc: 72.1389 %  installs: 4487
+  H8  preds: 13895  correct: 9223  acc: 66.3764 %  installs: 5205
+=========================
+=== srv_715 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 130161
+T-IRIP predictions : 73018
+T-IRIP correct     : 61458
+IRIP  predictions  : 24094
+T-IRIP contribution: 56.0982 %
+T-IRIP accuracy    : 84.1683 %
+T-IRIP installs    : 64239
+T-IRIP evictions   : 61169
+T-IRIP alloc blocked: 2341
+T-IRIP u resets    : 0
+Installs per miss  : 0.493535
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39148  correct: 35874  acc: 91.6369 %  installs: 55296
+  H4  preds: 17976  correct: 13953  acc: 77.6202 %  installs: 4821
+  H8  preds: 15894  correct: 11631  acc: 73.1786 %  installs: 4122
+=========================
+=== srv_727 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126543
+T-IRIP predictions : 74396
+T-IRIP correct     : 60515
+IRIP  predictions  : 27077
+T-IRIP contribution: 58.7911 %
+T-IRIP accuracy    : 81.3417 %
+T-IRIP installs    : 60766
+T-IRIP evictions   : 57694
+T-IRIP alloc blocked: 1869
+T-IRIP u resets    : 0
+Installs per miss  : 0.4802
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39866  correct: 36443  acc: 91.4137 %  installs: 50651
+  H4  preds: 20114  correct: 14803  acc: 73.5955 %  installs: 4654
+  H8  preds: 14416  correct: 9269  acc: 64.2966 %  installs: 5461
+=========================
+=== srv_73 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 103630
+T-IRIP predictions : 54482
+T-IRIP correct     : 44852
+IRIP  predictions  : 20493
+T-IRIP contribution: 52.5736 %
+T-IRIP accuracy    : 82.3244 %
+T-IRIP installs    : 55246
+T-IRIP evictions   : 52179
+T-IRIP alloc blocked: 1315
+T-IRIP u resets    : 0
+Installs per miss  : 0.533108
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 29598  correct: 27096  acc: 91.5467 %  installs: 48089
+  H4  preds: 14063  correct: 10349  acc: 73.5903 %  installs: 3416
+  H8  preds: 10821  correct: 7407  acc: 68.4502 %  installs: 3741
+=========================
+=== srv_743 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 106761
+T-IRIP predictions : 71197
+T-IRIP correct     : 56677
+IRIP  predictions  : 19351
+T-IRIP contribution: 66.6882 %
+T-IRIP accuracy    : 79.6059 %
+T-IRIP installs    : 44365
+T-IRIP evictions   : 41293
+T-IRIP alloc blocked: 1379
+T-IRIP u resets    : 0
+Installs per miss  : 0.415554
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 37185  correct: 33713  acc: 90.6629 %  installs: 34401
+  H4  preds: 17635  correct: 12218  acc: 69.2827 %  installs: 4507
+  H8  preds: 16377  correct: 10746  acc: 65.6164 %  installs: 5457
+=========================
+=== srv_764 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 109729
+T-IRIP predictions : 64115
+T-IRIP correct     : 51621
+IRIP  predictions  : 21866
+T-IRIP contribution: 58.4303 %
+T-IRIP accuracy    : 80.5131 %
+T-IRIP installs    : 53250
+T-IRIP evictions   : 50179
+T-IRIP alloc blocked: 1501
+T-IRIP u resets    : 0
+Installs per miss  : 0.485286
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 34471  correct: 31487  acc: 91.3434 %  installs: 44357
+  H4  preds: 16721  correct: 11981  acc: 71.6524 %  installs: 4080
+  H8  preds: 12923  correct: 8153  acc: 63.0891 %  installs: 4813
+=========================
+=== srv_771 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 124508
+T-IRIP predictions : 70380
+T-IRIP correct     : 57676
+IRIP  predictions  : 28390
+T-IRIP contribution: 56.5265 %
+T-IRIP accuracy    : 81.9494 %
+T-IRIP installs    : 62123
+T-IRIP evictions   : 59051
+T-IRIP alloc blocked: 2222
+T-IRIP u resets    : 0
+Installs per miss  : 0.498948
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 38511  correct: 34884  acc: 90.5819 %  installs: 52233
+  H4  preds: 17168  correct: 12702  acc: 73.9865 %  installs: 5298
+  H8  preds: 14701  correct: 10090  acc: 68.6348 %  installs: 4592
+=========================
+=== srv_85 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 136441
+T-IRIP predictions : 79917
+T-IRIP correct     : 67069
+IRIP  predictions  : 28500
+T-IRIP contribution: 58.5726 %
+T-IRIP accuracy    : 83.9233 %
+T-IRIP installs    : 64250
+T-IRIP evictions   : 61178
+T-IRIP alloc blocked: 2710
+T-IRIP u resets    : 0
+Installs per miss  : 0.4709
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 42568  correct: 39125  acc: 91.9118 %  installs: 54350
+  H4  preds: 20024  correct: 15549  acc: 77.6518 %  installs: 5279
+  H8  preds: 17325  correct: 12395  acc: 71.544 %  installs: 4621
+=========================
+=== srv_s0 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126082
+T-IRIP predictions : 75034
+T-IRIP correct     : 63442
+IRIP  predictions  : 26423
+T-IRIP contribution: 59.5121 %
+T-IRIP accuracy    : 84.551 %
+T-IRIP installs    : 57605
+T-IRIP evictions   : 54588
+T-IRIP alloc blocked: 1798
+T-IRIP u resets    : 0
+Installs per miss  : 0.456885
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 41676  correct: 38831  acc: 93.1735 %  installs: 49482
+  H4  preds: 16816  correct: 13006  acc: 77.343 %  installs: 4268
+  H8  preds: 16542  correct: 11605  acc: 70.1548 %  installs: 3855
+=========================
+=== srv_s10 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 123360
+T-IRIP predictions : 78906
+T-IRIP correct     : 65624
+IRIP  predictions  : 24423
+T-IRIP contribution: 63.964 %
+T-IRIP accuracy    : 83.1673 %
+T-IRIP installs    : 51798
+T-IRIP evictions   : 48753
+T-IRIP alloc blocked: 1979
+T-IRIP u resets    : 0
+Installs per miss  : 0.419893
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 43085  correct: 40423  acc: 93.8215 %  installs: 42734
+  H4  preds: 19228  correct: 14438  acc: 75.0884 %  installs: 4208
+  H8  preds: 16593  correct: 10763  acc: 64.8647 %  installs: 4856
+=========================
+=== srv_s60 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 137340
+T-IRIP predictions : 81796
+T-IRIP correct     : 70123
+IRIP  predictions  : 29024
+T-IRIP contribution: 59.5573 %
+T-IRIP accuracy    : 85.7291 %
+T-IRIP installs    : 61841
+T-IRIP evictions   : 58807
+T-IRIP alloc blocked: 2373
+T-IRIP u resets    : 0
+Installs per miss  : 0.450277
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 45031  correct: 42221  acc: 93.7599 %  installs: 53597
+  H4  preds: 18839  correct: 15203  acc: 80.6996 %  installs: 4475
+  H8  preds: 17926  correct: 12699  acc: 70.8412 %  installs: 3769
+=========================
+=== srv_s61 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126211
+T-IRIP predictions : 72944
+T-IRIP correct     : 61336
+IRIP  predictions  : 28788
+T-IRIP contribution: 57.7953 %
+T-IRIP accuracy    : 84.0864 %
+T-IRIP installs    : 59499
+T-IRIP evictions   : 56479
+T-IRIP alloc blocked: 1596
+T-IRIP u resets    : 0
+Installs per miss  : 0.471425
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 40353  correct: 37712  acc: 93.4553 %  installs: 51923
+  H4  preds: 16944  correct: 13265  acc: 78.2873 %  installs: 3819
+  H8  preds: 15647  correct: 10359  acc: 66.2044 %  installs: 3757
+=========================
+=== srv_s69 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 120875
+T-IRIP predictions : 71420
+T-IRIP correct     : 59429
+IRIP  predictions  : 24176
+T-IRIP contribution: 59.0858 %
+T-IRIP accuracy    : 83.2106 %
+T-IRIP installs    : 56122
+T-IRIP evictions   : 53099
+T-IRIP alloc blocked: 1264
+T-IRIP u resets    : 0
+Installs per miss  : 0.464298
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 39352  correct: 36847  acc: 93.6344 %  installs: 48390
+  H4  preds: 16928  correct: 12664  acc: 74.811 %  installs: 3464
+  H8  preds: 15140  correct: 9918  acc: 65.5086 %  installs: 4268
+=========================
+=== srv_s7 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 115046
+T-IRIP predictions : 79677
+T-IRIP correct     : 65438
+IRIP  predictions  : 19366
+T-IRIP contribution: 69.2566 %
+T-IRIP accuracy    : 82.1291 %
+T-IRIP installs    : 43110
+T-IRIP evictions   : 40097
+T-IRIP alloc blocked: 904
+T-IRIP u resets    : 0
+Installs per miss  : 0.37472
+--- v2 config: alloc_policy=1 u_bit=1 hist_delta=0 entries H2/H4/H8=1024/1024/1024 ---
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 42278  correct: 39668  acc: 93.8266 %  installs: 34617
+  H4  preds: 19184  correct: 13997  acc: 72.9618 %  installs: 3261
+  H8  preds: 18215  correct: 11773  acc: 64.6335 %  installs: 5232
+=========================
+################ CONFIG: morriganPT_tage64fp_tage ################
+################ CONFIG: morriganPT_tagefp_tage ################
+=== srv_128 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 107026
+T-IRIP predictions : 397
+T-IRIP correct     : 144
+IRIP  predictions  : 55877
+T-IRIP contribution: 0.370938 %
+T-IRIP accuracy    : 36.272 %
+T-IRIP installs    : 320657
+T-IRIP evictions   : 320337
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 258  correct: 117  acc: 45.3488 %
+  H4  preds: 99  correct: 27  acc: 27.2727 %
+  H8  preds: 40  correct: 0  acc: 0 %
+=========================
+=== srv_12 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 143625
+T-IRIP predictions : 613
+T-IRIP correct     : 156
+IRIP  predictions  : 64932
+T-IRIP contribution: 0.426806 %
+T-IRIP accuracy    : 25.4486 %
+T-IRIP installs    : 430233
+T-IRIP evictions   : 429913
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 378  correct: 108  acc: 28.5714 %
+  H4  preds: 159  correct: 48  acc: 30.1887 %
+  H8  preds: 76  correct: 0  acc: 0 %
+=========================
+=== srv_194 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 108381
+T-IRIP predictions : 260
+T-IRIP correct     : 46
+IRIP  predictions  : 53012
+T-IRIP contribution: 0.239894 %
+T-IRIP accuracy    : 17.6923 %
+T-IRIP installs    : 324866
+T-IRIP evictions   : 324546
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 156  correct: 38  acc: 24.359 %
+  H4  preds: 79  correct: 8  acc: 10.1266 %
+  H8  preds: 25  correct: 0  acc: 0 %
+=========================
+=== srv_207 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 136914
+T-IRIP predictions : 680
+T-IRIP correct     : 163
+IRIP  predictions  : 69122
+T-IRIP contribution: 0.496662 %
+T-IRIP accuracy    : 23.9706 %
+T-IRIP installs    : 410000
+T-IRIP evictions   : 409680
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 391  correct: 95  acc: 24.2967 %
+  H4  preds: 224  correct: 68  acc: 30.3571 %
+  H8  preds: 65  correct: 0  acc: 0 %
+=========================
+=== srv_21 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 119045
+T-IRIP predictions : 354
+T-IRIP correct     : 91
+IRIP  predictions  : 58038
+T-IRIP contribution: 0.297367 %
+T-IRIP accuracy    : 25.7062 %
+T-IRIP installs    : 356761
+T-IRIP evictions   : 356441
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 229  correct: 73  acc: 31.8777 %
+  H4  preds: 89  correct: 18  acc: 20.2247 %
+  H8  preds: 36  correct: 0  acc: 0 %
+=========================
+=== srv_222 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 125639
+T-IRIP predictions : 918
+T-IRIP correct     : 395
+IRIP  predictions  : 71031
+T-IRIP contribution: 0.730665 %
+T-IRIP accuracy    : 43.0283 %
+T-IRIP installs    : 375959
+T-IRIP evictions   : 375639
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 589  correct: 260  acc: 44.1426 %
+  H4  preds: 276  correct: 135  acc: 48.913 %
+  H8  preds: 53  correct: 0  acc: 0 %
+=========================
+=== srv_225 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 124748
+T-IRIP predictions : 484
+T-IRIP correct     : 148
+IRIP  predictions  : 70393
+T-IRIP contribution: 0.387982 %
+T-IRIP accuracy    : 30.5785 %
+T-IRIP installs    : 373721
+T-IRIP evictions   : 373401
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 306  correct: 116  acc: 37.9085 %
+  H4  preds: 132  correct: 32  acc: 24.2424 %
+  H8  preds: 46  correct: 0  acc: 0 %
+=========================
+=== srv_255 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 122802
+T-IRIP predictions : 507
+T-IRIP correct     : 154
+IRIP  predictions  : 69748
+T-IRIP contribution: 0.41286 %
+T-IRIP accuracy    : 30.3748 %
+T-IRIP installs    : 367860
+T-IRIP evictions   : 367540
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 320  correct: 121  acc: 37.8125 %
+  H4  preds: 150  correct: 33  acc: 22 %
+  H8  preds: 37  correct: 0  acc: 0 %
+=========================
+=== srv_259 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 130993
+T-IRIP predictions : 984
+T-IRIP correct     : 532
+IRIP  predictions  : 72038
+T-IRIP contribution: 0.751185 %
+T-IRIP accuracy    : 54.065 %
+T-IRIP installs    : 391953
+T-IRIP evictions   : 391633
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 617  correct: 339  acc: 54.9433 %
+  H4  preds: 328  correct: 193  acc: 58.8415 %
+  H8  preds: 39  correct: 0  acc: 0 %
+=========================
+=== srv_276 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 125869
+T-IRIP predictions : 269
+T-IRIP correct     : 35
+IRIP  predictions  : 53887
+T-IRIP contribution: 0.213714 %
+T-IRIP accuracy    : 13.0112 %
+T-IRIP installs    : 377317
+T-IRIP evictions   : 376997
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 143  correct: 28  acc: 19.5804 %
+  H4  preds: 77  correct: 7  acc: 9.09091 %
+  H8  preds: 49  correct: 0  acc: 0 %
+=========================
+=== srv_287 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 112833
+T-IRIP predictions : 405
+T-IRIP correct     : 115
+IRIP  predictions  : 54193
+T-IRIP contribution: 0.358938 %
+T-IRIP accuracy    : 28.3951 %
+T-IRIP installs    : 338068
+T-IRIP evictions   : 337748
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 260  correct: 94  acc: 36.1538 %
+  H4  preds: 102  correct: 21  acc: 20.5882 %
+  H8  preds: 43  correct: 0  acc: 0 %
+=========================
+=== srv_32 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 124857
+T-IRIP predictions : 410
+T-IRIP correct     : 108
+IRIP  predictions  : 67400
+T-IRIP contribution: 0.328376 %
+T-IRIP accuracy    : 26.3415 %
+T-IRIP installs    : 374126
+T-IRIP evictions   : 373806
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 262  correct: 78  acc: 29.771 %
+  H4  preds: 110  correct: 30  acc: 27.2727 %
+  H8  preds: 38  correct: 0  acc: 0 %
+=========================
+=== srv_364 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 121809
+T-IRIP predictions : 346
+T-IRIP correct     : 79
+IRIP  predictions  : 69363
+T-IRIP contribution: 0.284051 %
+T-IRIP accuracy    : 22.8324 %
+T-IRIP installs    : 365055
+T-IRIP evictions   : 364735
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 211  correct: 61  acc: 28.91 %
+  H4  preds: 100  correct: 18  acc: 18 %
+  H8  preds: 35  correct: 0  acc: 0 %
+=========================
+=== srv_408 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 118427
+T-IRIP predictions : 650
+T-IRIP correct     : 238
+IRIP  predictions  : 61323
+T-IRIP contribution: 0.548861 %
+T-IRIP accuracy    : 36.6154 %
+T-IRIP installs    : 354589
+T-IRIP evictions   : 354269
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 437  correct: 174  acc: 39.8169 %
+  H4  preds: 158  correct: 64  acc: 40.5063 %
+  H8  preds: 55  correct: 0  acc: 0 %
+=========================
+=== srv_41 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126292
+T-IRIP predictions : 742
+T-IRIP correct     : 240
+IRIP  predictions  : 68335
+T-IRIP contribution: 0.587527 %
+T-IRIP accuracy    : 32.345 %
+T-IRIP installs    : 378097
+T-IRIP evictions   : 377777
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 465  correct: 170  acc: 36.5591 %
+  H4  preds: 194  correct: 70  acc: 36.0825 %
+  H8  preds: 83  correct: 0  acc: 0 %
+=========================
+=== srv_426 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 116535
+T-IRIP predictions : 365
+T-IRIP correct     : 59
+IRIP  predictions  : 60550
+T-IRIP contribution: 0.313211 %
+T-IRIP accuracy    : 16.1644 %
+T-IRIP installs    : 349215
+T-IRIP evictions   : 348895
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 211  correct: 43  acc: 20.3791 %
+  H4  preds: 103  correct: 16  acc: 15.534 %
+  H8  preds: 51  correct: 0  acc: 0 %
+=========================
+=== srv_442 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 127491
+T-IRIP predictions : 1494
+T-IRIP correct     : 837
+IRIP  predictions  : 75737
+T-IRIP contribution: 1.17185 %
+T-IRIP accuracy    : 56.0241 %
+T-IRIP installs    : 380880
+T-IRIP evictions   : 380560
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 902  correct: 500  acc: 55.4324 %
+  H4  preds: 544  correct: 335  acc: 61.5809 %
+  H8  preds: 48  correct: 2  acc: 4.16667 %
+=========================
+=== srv_48 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 124203
+T-IRIP predictions : 1206
+T-IRIP correct     : 611
+IRIP  predictions  : 70653
+T-IRIP contribution: 0.970991 %
+T-IRIP accuracy    : 50.6633 %
+T-IRIP installs    : 371319
+T-IRIP evictions   : 370999
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 779  correct: 425  acc: 54.5571 %
+  H4  preds: 366  correct: 182  acc: 49.7268 %
+  H8  preds: 61  correct: 4  acc: 6.55738 %
+=========================
+=== srv_495 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126593
+T-IRIP predictions : 488
+T-IRIP correct     : 161
+IRIP  predictions  : 68812
+T-IRIP contribution: 0.385487 %
+T-IRIP accuracy    : 32.9918 %
+T-IRIP installs    : 379261
+T-IRIP evictions   : 378941
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 303  correct: 120  acc: 39.604 %
+  H4  preds: 134  correct: 41  acc: 30.597 %
+  H8  preds: 51  correct: 0  acc: 0 %
+=========================
+=== srv_504 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 121954
+T-IRIP predictions : 971
+T-IRIP correct     : 445
+IRIP  predictions  : 69084
+T-IRIP contribution: 0.796202 %
+T-IRIP accuracy    : 45.829 %
+T-IRIP installs    : 364832
+T-IRIP evictions   : 364512
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 600  correct: 283  acc: 47.1667 %
+  H4  preds: 317  correct: 161  acc: 50.7886 %
+  H8  preds: 54  correct: 1  acc: 1.85185 %
+=========================
+=== srv_526 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 100257
+T-IRIP predictions : 870
+T-IRIP correct     : 247
+IRIP  predictions  : 68371
+T-IRIP contribution: 0.86777 %
+T-IRIP accuracy    : 28.3908 %
+T-IRIP installs    : 299853
+T-IRIP evictions   : 299533
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 676  correct: 207  acc: 30.6213 %
+  H4  preds: 166  correct: 40  acc: 24.0964 %
+  H8  preds: 28  correct: 0  acc: 0 %
+=========================
+=== srv_537 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 130451
+T-IRIP predictions : 926
+T-IRIP correct     : 385
+IRIP  predictions  : 64434
+T-IRIP contribution: 0.709845 %
+T-IRIP accuracy    : 41.5767 %
+T-IRIP installs    : 390366
+T-IRIP evictions   : 390046
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 589  correct: 258  acc: 43.8031 %
+  H4  preds: 262  correct: 127  acc: 48.4733 %
+  H8  preds: 75  correct: 0  acc: 0 %
+=========================
+=== srv_540 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 134424
+T-IRIP predictions : 729
+T-IRIP correct     : 257
+IRIP  predictions  : 70405
+T-IRIP contribution: 0.542314 %
+T-IRIP accuracy    : 35.2538 %
+T-IRIP installs    : 402505
+T-IRIP evictions   : 402185
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 442  correct: 191  acc: 43.2127 %
+  H4  preds: 180  correct: 66  acc: 36.6667 %
+  H8  preds: 107  correct: 0  acc: 0 %
+=========================
+=== srv_551 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 114494
+T-IRIP predictions : 436
+T-IRIP correct     : 124
+IRIP  predictions  : 59243
+T-IRIP contribution: 0.380806 %
+T-IRIP accuracy    : 28.4404 %
+T-IRIP installs    : 343018
+T-IRIP evictions   : 342698
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 286  correct: 91  acc: 31.8182 %
+  H4  preds: 116  correct: 33  acc: 28.4483 %
+  H8  preds: 34  correct: 0  acc: 0 %
+=========================
+=== srv_575 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 85350
+T-IRIP predictions : 706
+T-IRIP correct     : 298
+IRIP  predictions  : 43130
+T-IRIP contribution: 0.827182 %
+T-IRIP accuracy    : 42.2096 %
+T-IRIP installs    : 255296
+T-IRIP evictions   : 254976
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 453  correct: 204  acc: 45.0331 %
+  H4  preds: 224  correct: 94  acc: 41.9643 %
+  H8  preds: 29  correct: 0  acc: 0 %
+=========================
+=== srv_582 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 125069
+T-IRIP predictions : 495
+T-IRIP correct     : 138
+IRIP  predictions  : 73030
+T-IRIP contribution: 0.395782 %
+T-IRIP accuracy    : 27.8788 %
+T-IRIP installs    : 374679
+T-IRIP evictions   : 374359
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 327  correct: 108  acc: 33.0275 %
+  H4  preds: 138  correct: 30  acc: 21.7391 %
+  H8  preds: 30  correct: 0  acc: 0 %
+=========================
+=== srv_617 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 122779
+T-IRIP predictions : 891
+T-IRIP correct     : 374
+IRIP  predictions  : 67691
+T-IRIP contribution: 0.725694 %
+T-IRIP accuracy    : 41.9753 %
+T-IRIP installs    : 367403
+T-IRIP evictions   : 367083
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 609  correct: 263  acc: 43.1856 %
+  H4  preds: 223  correct: 111  acc: 49.7758 %
+  H8  preds: 59  correct: 0  acc: 0 %
+=========================
+=== srv_61 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 125596
+T-IRIP predictions : 436
+T-IRIP correct     : 124
+IRIP  predictions  : 67819
+T-IRIP contribution: 0.347145 %
+T-IRIP accuracy    : 28.4404 %
+T-IRIP installs    : 376323
+T-IRIP evictions   : 376003
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 295  correct: 94  acc: 31.8644 %
+  H4  preds: 113  correct: 30  acc: 26.5487 %
+  H8  preds: 28  correct: 0  acc: 0 %
+=========================
+=== srv_641 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 123320
+T-IRIP predictions : 427
+T-IRIP correct     : 138
+IRIP  predictions  : 64177
+T-IRIP contribution: 0.346254 %
+T-IRIP accuracy    : 32.3185 %
+T-IRIP installs    : 369510
+T-IRIP evictions   : 369190
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 292  correct: 109  acc: 37.3288 %
+  H4  preds: 98  correct: 29  acc: 29.5918 %
+  H8  preds: 37  correct: 0  acc: 0 %
+=========================
+=== srv_669 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 117893
+T-IRIP predictions : 638
+T-IRIP correct     : 218
+IRIP  predictions  : 60162
+T-IRIP contribution: 0.541169 %
+T-IRIP accuracy    : 34.1693 %
+T-IRIP installs    : 353008
+T-IRIP evictions   : 352688
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 370  correct: 163  acc: 44.0541 %
+  H4  preds: 180  correct: 53  acc: 29.4444 %
+  H8  preds: 88  correct: 2  acc: 2.27273 %
+=========================
+=== srv_702 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126454
+T-IRIP predictions : 930
+T-IRIP correct     : 369
+IRIP  predictions  : 67764
+T-IRIP contribution: 0.735445 %
+T-IRIP accuracy    : 39.6774 %
+T-IRIP installs    : 378380
+T-IRIP evictions   : 378060
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 576  correct: 245  acc: 42.5347 %
+  H4  preds: 302  correct: 124  acc: 41.0596 %
+  H8  preds: 52  correct: 0  acc: 0 %
+=========================
+=== srv_706 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 118865
+T-IRIP predictions : 380
+T-IRIP correct     : 103
+IRIP  predictions  : 65293
+T-IRIP contribution: 0.31969 %
+T-IRIP accuracy    : 27.1053 %
+T-IRIP installs    : 356185
+T-IRIP evictions   : 355865
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 236  correct: 84  acc: 35.5932 %
+  H4  preds: 102  correct: 19  acc: 18.6275 %
+  H8  preds: 42  correct: 0  acc: 0 %
+=========================
+=== srv_715 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 130161
+T-IRIP predictions : 572
+T-IRIP correct     : 93
+IRIP  predictions  : 61551
+T-IRIP contribution: 0.439456 %
+T-IRIP accuracy    : 16.2587 %
+T-IRIP installs    : 389876
+T-IRIP evictions   : 389556
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 314  correct: 70  acc: 22.293 %
+  H4  preds: 171  correct: 23  acc: 13.4503 %
+  H8  preds: 87  correct: 0  acc: 0 %
+=========================
+=== srv_727 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126543
+T-IRIP predictions : 463
+T-IRIP correct     : 134
+IRIP  predictions  : 71677
+T-IRIP contribution: 0.365884 %
+T-IRIP accuracy    : 28.9417 %
+T-IRIP installs    : 379131
+T-IRIP evictions   : 378811
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 300  correct: 99  acc: 33 %
+  H4  preds: 131  correct: 35  acc: 26.7176 %
+  H8  preds: 32  correct: 0  acc: 0 %
+=========================
+=== srv_73 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 103630
+T-IRIP predictions : 310
+T-IRIP correct     : 48
+IRIP  predictions  : 47100
+T-IRIP contribution: 0.299141 %
+T-IRIP accuracy    : 15.4839 %
+T-IRIP installs    : 310557
+T-IRIP evictions   : 310237
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 150  correct: 34  acc: 22.6667 %
+  H4  preds: 113  correct: 14  acc: 12.3894 %
+  H8  preds: 47  correct: 0  acc: 0 %
+=========================
+=== srv_743 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 106761
+T-IRIP predictions : 816
+T-IRIP correct     : 206
+IRIP  predictions  : 69485
+T-IRIP contribution: 0.764324 %
+T-IRIP accuracy    : 25.2451 %
+T-IRIP installs    : 319439
+T-IRIP evictions   : 319119
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 618  correct: 147  acc: 23.7864 %
+  H4  preds: 159  correct: 57  acc: 35.8491 %
+  H8  preds: 39  correct: 2  acc: 5.12821 %
+=========================
+=== srv_764 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 109729
+T-IRIP predictions : 358
+T-IRIP correct     : 131
+IRIP  predictions  : 58296
+T-IRIP contribution: 0.326258 %
+T-IRIP accuracy    : 36.5922 %
+T-IRIP installs    : 328800
+T-IRIP evictions   : 328480
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 214  correct: 95  acc: 44.3925 %
+  H4  preds: 116  correct: 36  acc: 31.0345 %
+  H8  preds: 28  correct: 0  acc: 0 %
+=========================
+=== srv_771 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 124509
+T-IRIP predictions : 909
+T-IRIP correct     : 392
+IRIP  predictions  : 70420
+T-IRIP contribution: 0.730068 %
+T-IRIP accuracy    : 43.1243 %
+T-IRIP installs    : 372577
+T-IRIP evictions   : 372257
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 581  correct: 256  acc: 44.062 %
+  H4  preds: 277  correct: 136  acc: 49.0975 %
+  H8  preds: 51  correct: 0  acc: 0 %
+=========================
+=== srv_85 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 136441
+T-IRIP predictions : 842
+T-IRIP correct     : 285
+IRIP  predictions  : 74507
+T-IRIP contribution: 0.617117 %
+T-IRIP accuracy    : 33.848 %
+T-IRIP installs    : 408419
+T-IRIP evictions   : 408099
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 534  correct: 209  acc: 39.1386 %
+  H4  preds: 247  correct: 76  acc: 30.7692 %
+  H8  preds: 61  correct: 0  acc: 0 %
+=========================
+=== srv_s0 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126082
+T-IRIP predictions : 760
+T-IRIP correct     : 309
+IRIP  predictions  : 68288
+T-IRIP contribution: 0.602782 %
+T-IRIP accuracy    : 40.6579 %
+T-IRIP installs    : 377442
+T-IRIP evictions   : 377122
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 472  correct: 176  acc: 37.2881 %
+  H4  preds: 253  correct: 133  acc: 52.5692 %
+  H8  preds: 35  correct: 0  acc: 0 %
+=========================
+=== srv_s10 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 123357
+T-IRIP predictions : 556
+T-IRIP correct     : 175
+IRIP  predictions  : 76620
+T-IRIP contribution: 0.450724 %
+T-IRIP accuracy    : 31.4748 %
+T-IRIP installs    : 369483
+T-IRIP evictions   : 369163
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 369  correct: 135  acc: 36.5854 %
+  H4  preds: 162  correct: 40  acc: 24.6914 %
+  H8  preds: 25  correct: 0  acc: 0 %
+=========================
+=== srv_s60 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 137343
+T-IRIP predictions : 907
+T-IRIP correct     : 357
+IRIP  predictions  : 76963
+T-IRIP contribution: 0.66039 %
+T-IRIP accuracy    : 39.3605 %
+T-IRIP installs    : 411057
+T-IRIP evictions   : 410737
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 572  correct: 269  acc: 47.028 %
+  H4  preds: 278  correct: 88  acc: 31.6547 %
+  H8  preds: 57  correct: 0  acc: 0 %
+=========================
+=== srv_s61 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 126207
+T-IRIP predictions : 1007
+T-IRIP correct     : 425
+IRIP  predictions  : 74822
+T-IRIP contribution: 0.797896 %
+T-IRIP accuracy    : 42.2046 %
+T-IRIP installs    : 377567
+T-IRIP evictions   : 377247
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 640  correct: 274  acc: 42.8125 %
+  H4  preds: 323  correct: 151  acc: 46.7492 %
+  H8  preds: 44  correct: 0  acc: 0 %
+=========================
+=== srv_s69 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 120881
+T-IRIP predictions : 456
+T-IRIP correct     : 172
+IRIP  predictions  : 64712
+T-IRIP contribution: 0.37723 %
+T-IRIP accuracy    : 37.7193 %
+T-IRIP installs    : 362165
+T-IRIP evictions   : 361845
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 311  correct: 142  acc: 45.6592 %
+  H4  preds: 104  correct: 30  acc: 28.8462 %
+  H8  preds: 41  correct: 0  acc: 0 %
+=========================
+=== srv_s7 ===
+=== T-IRIP Statistics ===
+Total iSTLB misses : 115046
+T-IRIP predictions : 860
+T-IRIP correct     : 225
+IRIP  predictions  : 75160
+T-IRIP contribution: 0.747527 %
+T-IRIP accuracy    : 26.1628 %
+T-IRIP installs    : 344246
+T-IRIP evictions   : 343926
+--- per-table breakdown (history length / preds / correct / acc) ---
+  H2  preds: 674  correct: 153  acc: 22.7003 %
+  H4  preds: 155  correct: 72  acc: 46.4516 %
+  H8  preds: 31  correct: 0  acc: 0 %
+=========================

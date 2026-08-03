@@ -1,0 +1,36 @@
+Configs found: nonofp, morriganPTfp, morriganPT_tagefp_tage, morriganPT_tage2fp_tage2
+
+==============================================================================
+ SUMMARY  (45 traces)
+==============================================================================
+config                      geo speedup    coverage    accuracy
+------------------------------------------------------------------------------
+Baseline (no prefetcher)        +0.000%       0.00%       0.00%
+Morrigan (IRIP+SDP)             +7.493%      75.34%      14.21%
+Morrigan + T-IRIP v1            +7.459%      75.03%      14.15%
+Morrigan + T-IRIP v2            +8.398%      84.91%      13.91%
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+Morrigan + T-IRIP v1 vs Morrigan : geomean -0.0314 pp, wins 20 / 45 traces
+  activity   : 29223 predictions on 5477678 iSTLB misses = 0.533% of misses
+  accuracy   : 10484 correct = 35.88%
+  installs   : 16402054  (2.99 per iSTLB miss)  evict rate 99.91%
+               a high installs-per-miss with a ~100% evict rate
+               means the tables are thrashing, not predicting
+  per-history-table:
+    H2   preds     18717   correct      7319   acc  39.10%
+    H4   preds      8334   correct      3154   acc  37.84%
+    H8   preds      2172   correct        11   acc   0.51%
+------------------------------------------------------------------------------
+Morrigan + T-IRIP v2 vs Morrigan : geomean +0.8424 pp, wins 45 / 45 traces
+  activity   : 3199867 predictions on 5477667 iSTLB misses = 58.417% of misses
+  accuracy   : 2633606 correct = 82.30%
+  installs   : 2622920  (0.48 per iSTLB miss)  evict rate 94.74%
+               a high installs-per-miss with a ~100% evict rate
+               means the tables are thrashing, not predicting
+  per-history-table:
+    H2   preds   1724100   correct   1580446   acc  91.67%
+    H4   preds    803120   correct    596077   acc  74.22%
+    H8   preds    672647   correct    457083   acc  67.95%
+==============================================================================
+Wrote /home/raje/mtp/micro-arch/old-work/tage-istlb/handback_sweep1/results.csv

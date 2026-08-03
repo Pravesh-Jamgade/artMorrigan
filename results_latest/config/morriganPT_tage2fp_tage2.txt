@@ -1,0 +1,28 @@
+config      : morriganPT_tage2fp_tage2
+binary      : morriganPT_tage264fp_tage2-hashed_perceptron-next_line-next_line-spp_dev-lru-1core
+date        : 2026-08-03T23:40:31+05:30
+host        : raje-linux-workstation
+g++         : g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+warmup/sim  : 50M / 100M
+--- active #defines in inc/cache.h ---
+#define P2TLB 0
+#define ENABLE_FP 0
+#define ENABLE_PREF_FP 1
+#define RP_MP 1
+#define LLIMIT 5
+#define CNF_BITS 3
+#define RP_SUC_MP 0
+#define RESET_FREQ 5000
+#define STLB_SET 256
+#define STLB_WAY 6
+#define STLB_PQ_SIZE 64
+#define STLB_LATENCY 8
+--- inc/morriganPT.h ---
+#define PT_S1_SETS 128
+#define PT_S1_ASSOC 32
+#define PT_S2_SETS 128
+#define PT_S2_ASSOC 32
+#define PT_S4_SETS 128
+#define PT_S4_ASSOC 32
+#define PT_S8_SETS 64
+#define PT_S8_ASSOC 16
