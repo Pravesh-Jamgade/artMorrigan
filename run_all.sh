@@ -16,7 +16,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CS="$HERE/ChampSim-SC"
 
-export TRACE_DIR="${TRACE_DIR:-$HOME/mtp/micro-arch/old-work/traces}"
+# export TRACE_DIR="${TRACE_DIR:-$HOME/mtp/micro-arch/old-work/traces}"
 JOBS="${JOBS:-8}"
 WARMUP=50        # in millions
 SIM=100          # in millions
@@ -43,11 +43,13 @@ case "$WHAT" in
 esac
 
 TRACES=(
-  srv_12  srv_128 srv_194 srv_207 srv_21  srv_222 srv_225 srv_255 srv_259
-  srv_276 srv_287 srv_32  srv_364 srv_408 srv_41  srv_426 srv_442 srv_48
-  srv_495 srv_504 srv_526 srv_537 srv_540 srv_551 srv_575 srv_582 srv_61
-  srv_617 srv_641 srv_669 srv_702 srv_706 srv_715 srv_727 srv_73  srv_743
-  srv_764 srv_771 srv_85  srv_s0  srv_s10 srv_s60 srv_s61 srv_s69 srv_s7
+    arizona_0002.champsim-042.gz tango_0003.champsim-043.gz sierra.a.4_0002.champsim-041.gz
+    yankee_0004.champsim-014.gz tahoe_0003.champsim-037.gz merced_0001.champsim-011.gz
+#   srv_12  srv_128 srv_194 srv_207 srv_21  srv_222 srv_225 srv_255 srv_259
+#   srv_276 srv_287 srv_32  srv_364 srv_408 srv_41  srv_426 srv_442 srv_48
+#   srv_495 srv_504 srv_526 srv_537 srv_540 srv_551 srv_575 srv_582 srv_61
+#   srv_617 srv_641 srv_669 srv_702 srv_706 srv_715 srv_727 srv_73  srv_743
+#   srv_764 srv_771 srv_85  srv_s0  srv_s10 srv_s60 srv_s61 srv_s69 srv_s7
 )
 
 cd "$CS"
@@ -103,6 +105,7 @@ for cfg in "${CONFIGS[@]}"; do
         fi
         ./run_champsim.sh "${BINMAP[$cfg]}" "$WARMUP" "$SIM" "$t" "$cfg" &
         n=$((n+1))
+
         if [ "$((n % JOBS))" -eq 0 ]; then wait; echo "  ... $n/${#TRACES[@]} done"; fi
     done
     wait
