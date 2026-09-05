@@ -8,6 +8,10 @@
 // PAGE
 extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
+enum STLB_BLOCK_MODE { STLB_BLOCK_ANALYSIS, STLB_BLOCK_DETAIL };
+extern STLB_BLOCK_MODE stlb_block_mode;
+bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
+
 #define P2TLB 0
 
 // Free Prefetching
@@ -126,11 +130,21 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
 class CACHE : public MEMORY {
 	public:
+		struct STLB_BLOCK_ENTRY {
+			uint64_t tag, pte[4];
+			uint32_t lru;
+			uint8_t valid_mask;
+			STLB_BLOCK_ENTRY() : tag(0), lru(0), valid_mask(0) {
+				for (int i = 0; i < 4; ++i) pte[i] = 0;
+			}
+		};
 		uint32_t cpu;
 		const string NAME;
 		const uint32_t NUM_SET, NUM_WAY, NUM_LINE, WQ_SIZE, RQ_SIZE, PQ_SIZE, MSHR_SIZE;
 		uint32_t LATENCY;
 		BLOCK **block;
+		STLB_BLOCK_ENTRY **stlb_block;
+		uint64_t stlb_block_hits, stlb_block_misses;
 		int fill_level;
 		uint32_t MAX_READ, MAX_FILL;
 		uint32_t reads_available_this_cycle;
@@ -209,11 +223,14 @@ class CACHE : public MEMORY {
 
 				// cache block
 				block = new BLOCK* [NUM_SET];
+				stlb_block = new STLB_BLOCK_ENTRY* [NUM_SET];
 				for (uint32_t i=0; i<NUM_SET; i++) {
 					block[i] = new BLOCK[NUM_WAY]; 
+					stlb_block[i] = new STLB_BLOCK_ENTRY[NUM_WAY];
 
 					for (uint32_t j=0; j<NUM_WAY; j++) {
 						block[i][j].lru = j;
+						stlb_block[i][j].lru = j;
 					}
 				}
 
@@ -312,6 +329,7 @@ class CACHE : public MEMORY {
 				}
 
 				total_miss_latency = 0;
+				stlb_block_hits = stlb_block_misses = 0;
 
 				lower_level = NULL;
 				extra_interface = NULL;
@@ -330,11 +348,17 @@ class CACHE : public MEMORY {
 		~CACHE() {
 			for (uint32_t i=0; i<NUM_SET; i++)
 				delete[] block[i];
+			for (uint32_t i=0; i<NUM_SET; i++)
+				delete[] stlb_block[i];
 			delete[] block;
+			delete[] stlb_block;
 		};
 
 		// functions
 		pair<int, int> check_hit_stlb_pq(uint64_t vpn);
+		bool stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru = true);
+		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn);
+		void stlb_block_invalidate(uint64_t vpn);
 
 		int  add_rq(PACKET *packet),
 		     add_wq(PACKET *packet),

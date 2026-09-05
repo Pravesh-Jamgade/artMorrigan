@@ -21,9 +21,20 @@ time_t start_time;
 
 // PAGE TABLE
 uint32_t PAGE_TABLE_LATENCY = 0, SWAP_LATENCY = 0;
+STLB_BLOCK_MODE stlb_block_mode = STLB_BLOCK_ANALYSIS;
 queue <uint64_t > page_queue;
 map <uint64_t, uint64_t> page_table, inverse_table, recent_page, unique_cl[NUM_CPUS];
 uint64_t previous_ppage, num_adjacent_page, num_cl[NUM_CPUS], allocated_pages, num_page[NUM_CPUS], minor_fault[NUM_CPUS], major_fault[NUM_CPUS];
+
+bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn)
+{
+	uint64_t high_bit_mask = rotr64(cpu, lg2(NUM_CPUS));
+	auto found = page_table.find(vpn | high_bit_mask);
+	if (found == page_table.end())
+		return false;
+	*ppn = found->second;
+	return true;
+}
 
 void record_roi_stats(uint32_t cpu, CACHE *cache)
 {
@@ -65,6 +76,9 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 
 	cout << cache->NAME;
 	cout << " AVERAGE MISS LATENCY: " << (1.0*(cache->total_miss_latency))/TOTAL_MISS << " cycles" << endl;
+	if (cache->NAME == "STLB")
+		cout << "STLB BLOCK " << (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "ANALYSIS" : "DETAIL")
+		     << " HITS: " << cache->stlb_block_hits << " MISSES: " << cache->stlb_block_misses << endl;
 	//cout << " AVERAGE MISS LATENCY: " << (cache->total_miss_latency)/TOTAL_MISS << " cycles " << cache->total_miss_latency << "/" << TOTAL_MISS<< endl;
 }
 
@@ -193,6 +207,8 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 
 		cache->stlb_misses[0] = 0;
 		cache->stlb_misses[1] = 0;
+		cache->stlb_block_hits = 0;
+		cache->stlb_block_misses = 0;
 
 		cache->bpbp[0] = 0;
 		cache->bpbp[1] = 0;
@@ -1386,6 +1402,7 @@ int main(int argc, char** argv)
 			{"cloudsuite", no_argument, 0, 'c'},
 			{"low_bandwidth",  no_argument, 0, 'b'},
 			{"traces",  no_argument, 0, 't'},
+			{"stlb_mode", required_argument, 0, 'S'},
 			{0, 0, 0, 0}      
 		};
 
@@ -1419,6 +1436,16 @@ int main(int argc, char** argv)
 			case 't':
 				traces_encountered = 1;
 				break;
+			case 'S':
+				if (strcmp(optarg, "analysis") == 0)
+					stlb_block_mode = STLB_BLOCK_ANALYSIS;
+				else if (strcmp(optarg, "detail") == 0)
+					stlb_block_mode = STLB_BLOCK_DETAIL;
+				else {
+					cerr << "Invalid --stlb_mode (expected analysis or detail): " << optarg << endl;
+					return 1;
+				}
+				break;
 			default:
 				abort();
 		}
@@ -1434,6 +1461,7 @@ int main(int argc, char** argv)
 	cout << "Number of CPUs: " << NUM_CPUS << endl;
 	cout << "LLC sets: " << LLC_SET << endl;
 	cout << "LLC ways: " << LLC_WAY << endl;
+	cout << "STLB block mode: " << (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "analysis" : "detail") << endl;
 
 	if (knob_low_bandwidth)
 		DRAM_MTPS = DRAM_IO_FREQ/4;
