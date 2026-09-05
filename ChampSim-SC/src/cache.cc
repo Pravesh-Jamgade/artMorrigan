@@ -816,9 +816,10 @@ void CACHE::handle_fill()
 							PROCESSED.add_queue(&RQ.entry[index]);
 					}
 					else if (cache_type == IS_STLB){
-						RQ.entry[index].data = block[set][way].data;
+						if (stlb_block_mode != STLB_BLOCK_DETAIL)
+							RQ.entry[index].data = block[set][way].data;
 
-						if(current_core_cycle[read_cpu] < block[set][way].stalls)
+						if(stlb_block_mode != STLB_BLOCK_DETAIL && current_core_cycle[read_cpu] < block[set][way].stalls)
 							add_stall_prefetch(block[set][way].stalls-current_core_cycle[read_cpu], read_cpu);
 					}
 					else if (cache_type == IS_L1I) {
@@ -939,6 +940,13 @@ void CACHE::handle_fill()
 								lower_level->add_rq(&RQ.entry[index]);
 							else {
 								if (cache_type == IS_STLB) {
+									if (stlb_block_mode == STLB_BLOCK_ANALYSIS) {
+										uint64_t ignored_ppn;
+										if (stlb_block_lookup(RQ.entry[index].address, &ignored_ppn))
+											stlb_block_hits++;
+										else
+											stlb_block_misses++;
+									}
 									uint64_t pa, current_vpn = RQ.entry[index].address;
 									int bits, rowhit=-1, victim, iflag = 0;
 									pair<int, int> answer;
@@ -1423,6 +1431,65 @@ void CACHE::handle_fill()
 		return (uint32_t) (address & ((1 << lg2(NUM_SET)) - 1)); 
 	}
 
+	bool CACHE::stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru)
+	{
+		const uint64_t block_vpn = vpn >> 2;
+		const uint32_t offset = vpn & 3;
+		const uint32_t set = get_set(block_vpn);
+		for (uint32_t way = 0; way < NUM_WAY; ++way) {
+			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
+			if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
+				*ppn = entry.pte[offset];
+				if (update_lru) {
+					for (uint32_t other = 0; other < NUM_WAY; ++other)
+						if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
+					entry.lru = 0;
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void CACHE::stlb_block_fill(uint32_t owner_cpu, uint64_t vpn)
+	{
+		const uint64_t block_vpn = vpn >> 2;
+		const uint32_t set = get_set(block_vpn);
+		uint32_t way = NUM_WAY;
+		for (uint32_t candidate = 0; candidate < NUM_WAY; ++candidate) {
+			if (stlb_block[set][candidate].valid_mask && stlb_block[set][candidate].tag == block_vpn) {
+				way = candidate;
+				break;
+			}
+			if (!stlb_block[set][candidate].valid_mask || stlb_block[set][candidate].lru == NUM_WAY - 1)
+				way = candidate;
+		}
+		if (way == NUM_WAY) way = 0;
+		STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
+		entry.tag = block_vpn;
+		entry.valid_mask = 0;
+		for (uint32_t offset = 0; offset < 4; ++offset) {
+			uint64_t ppn;
+			if (lookup_allocated_pte(owner_cpu, (block_vpn << 2) | offset, &ppn)) {
+				entry.pte[offset] = ppn;
+				entry.valid_mask |= 1u << offset;
+			}
+		}
+		for (uint32_t other = 0; other < NUM_WAY; ++other)
+			if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
+		entry.lru = 0;
+	}
+
+	void CACHE::stlb_block_invalidate(uint64_t vpn)
+	{
+		const uint64_t block_vpn = vpn >> 2;
+		const uint32_t offset = vpn & 3;
+		const uint32_t set = get_set(block_vpn);
+		for (uint32_t way = 0; way < NUM_WAY; ++way)
+			if (stlb_block[set][way].valid_mask && stlb_block[set][way].tag == block_vpn)
+				stlb_block[set][way].valid_mask &= ~(1u << offset);
+	}
+
 	uint32_t CACHE::get_way(uint64_t address, uint32_t set)
 	{
 		for (uint32_t way=0; way<NUM_WAY; way++) {
@@ -1435,6 +1502,8 @@ void CACHE::handle_fill()
 
 	void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 	{
+		if (cache_type == IS_STLB)
+			stlb_block_fill(packet->cpu, packet->address);
 #ifdef SANITY_CHECK
 		if (cache_type == IS_ITLB) {
 			if (packet->data == 0){
@@ -1503,6 +1572,16 @@ void CACHE::handle_fill()
 
 	int CACHE::check_hit(PACKET *packet)
 	{
+		if (cache_type == IS_STLB && stlb_block_mode == STLB_BLOCK_DETAIL) {
+			uint64_t ppn = 0;
+			if (stlb_block_lookup(packet->address, &ppn)) {
+				stlb_block_hits++;
+				packet->data = ppn;
+				return 0; // The detail-mode hit path reads data from the packet.
+			}
+			stlb_block_misses++;
+			return -1;
+		}
 		uint32_t set = get_set(packet->address);
 		int match_way = -1;
 
@@ -1534,6 +1613,8 @@ void CACHE::handle_fill()
 
 	int CACHE::invalidate_entry(uint64_t inval_addr)
 	{
+		if (cache_type == IS_STLB)
+			stlb_block_invalidate(inval_addr);
 		uint32_t set = get_set(inval_addr);
 		int match_way = -1;
 
