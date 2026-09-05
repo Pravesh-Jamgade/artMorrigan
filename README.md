@@ -46,8 +46,9 @@ tage-istlb/
 │   │   ├── morriganPT_tage2.stlb_pref          T-IRIP v2  <- the contribution
 │   │   └── morriganPT_tage_BUGGY_ORIGINAL.stlb_pref.txt   pre-fix, for diffing
 │   ├── inc/morriganPT.h       IRIP table geometry
-│   ├── inc/cache.h            the #defines generate_binary.sh rewrites
-│   ├── generate_binary.sh     patched: path autodetect + config-leak fix
+│   ├── configs/               editable INI build configurations
+│   ├── configure_binary.py    validates INI knobs and configures the simulator
+│   ├── generate_binary.sh     user-friendly INI build entry point
 │   └── run_champsim.sh        patched: TRACE_DIR from environment
 ├── results_latest/            data of the run that produced the table above
 └── results_previous/          the original pre-fix run, kept for comparison
@@ -121,6 +122,47 @@ ls -1 ChampSim-SC/bin/          # expect 4 binaries
 
 Individually: `bash build_all.sh baseline | morrigan | tage | tage2`
 
+### Build from an editable configuration
+
+Simulator and binary-generation knobs are no longer buried in a shell script.
+Copy the documented defaults, change only what you need, and build it:
+
+```bash
+cp ChampSim-SC/configs/default.ini my-experiment.ini
+# Edit my-experiment.ini, including [build], [simulator], [morrigan], or [tage].
+ChampSim-SC/generate_binary.sh my-experiment.ini
+```
+
+For a plain baseline **without Morrigan or TAGE**, run the generator with no
+arguments (the default is the baseline), or use the explicit baseline preset:
+
+```bash
+ChampSim-SC/generate_binary.sh
+# Equivalent, and useful when scripting experiments:
+ChampSim-SC/generate_binary.sh ChampSim-SC/configs/baseline.ini
+```
+
+This selects `stlb_prefetcher = no`, disables free prefetching, and produces a
+binary whose name starts with `no64nofp-`. The `[morrigan]` and `[tage]` values
+in `default.ini` are only available defaults for those optional prefetchers;
+they are not enabled or applied by a baseline build.
+After compilation, the configurator restores the source files it temporarily
+changed, so a build does not leak its settings into the next build or dirty the
+working tree.
+
+`configs/default.ini` is always loaded first, so a smaller INI may contain only
+overrides; `configs/tage2.ini` is an example. A one-off override can be supplied
+without editing the file:
+
+```bash
+ChampSim-SC/generate_binary.sh ChampSim-SC/configs/tage2.ini \
+  --set tage.h2_sets=2048 --set build.name_suffix=_h2_2048
+```
+
+Run `ChampSim-SC/generate_binary.sh --help` for the complete command syntax.
+The old command-line flags remain accepted for compatibility with existing
+automation, including `build_all.sh` and `micro_ae.sh`.
+
 ## 5. test one trace 
 
 ```bash
@@ -181,7 +223,7 @@ CPU 0 cumulative IPC: ...     take the LAST one (end of ROI, not warmup)
 
 ## Tuning
 
-Compile-time, at the top of `prefetcher/morriganPT_tage2.stlb_pref`:
+Compile-time, in the `[tage]` section of `configs/default.ini`:
 
 | Knob | Default | Effect |
 |---|---|---|
@@ -195,4 +237,3 @@ Compile-time, at the top of `prefetcher/morriganPT_tage2.stlb_pref`:
 `TAGE_ALLOC_POLICY 0` at v2 capacity is the clean removal separating "bigger tables" from "better allocation".
 
 ---
-
