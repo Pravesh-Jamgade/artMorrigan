@@ -163,6 +163,12 @@ Run `ChampSim-SC/generate_binary.sh --help` for the complete command syntax.
 The old command-line flags remain accepted for compatibility with existing
 automation, including `build_all.sh` and `micro_ae.sh`.
 
+The shadow four-PTE STLB behavior is selected at build time with
+`simulator.stlb_mode`: `analysis` preserves the regular STLB behavior while
+collecting shadow-structure statistics, and `detail` makes accesses use the
+four-PTE structure. The generated binary still accepts `--stlb_mode` to
+override its configured default for an individual simulation.
+
 ## 5. test one trace 
 
 ```bash

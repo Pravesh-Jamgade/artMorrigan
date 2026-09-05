@@ -26,6 +26,7 @@ LEGACY_OPTIONS = {
     "--stlb_size": "simulator.stlb_sets", "-stlbs": "simulator.stlb_sets",
     "--stlb_assoc": "simulator.stlb_assoc", "-stlba": "simulator.stlb_assoc",
     "--stlb_lat": "simulator.stlb_latency", "-stlblat": "simulator.stlb_latency",
+    "--stlb_mode": "simulator.stlb_mode",
     "--asap": "simulator.asap", "-asap": "simulator.asap",
     "--ideal": "simulator.ideal", "-ideal": "simulator.ideal",
     "--p2tlb": "simulator.prefetch_to_tlb", "-p2tlb": "simulator.prefetch_to_tlb",
@@ -127,6 +128,15 @@ def configure(c: configparser.ConfigParser) -> list[str]:
         raise ValueError("simulator.page_size must be 4kb or 2mb")
     replace_define("inc/champsim.h", "PAGE_SIZE", page_sizes[page_size][0])
     replace_define("inc/champsim.h", "LOG2_PAGE_SIZE", page_sizes[page_size][1])
+
+    stlb_modes = {
+        "analysis": "STLB_BLOCK_ANALYSIS",
+        "detail": "STLB_BLOCK_DETAIL",
+    }
+    stlb_mode = get("simulator", "stlb_mode").lower()
+    if stlb_mode not in stlb_modes:
+        raise ValueError("simulator.stlb_mode must be analysis or detail")
+    replace_define("inc/cache.h", "DEFAULT_STLB_BLOCK_MODE", stlb_modes[stlb_mode])
 
     cache_macros = {
         "STLB_SET": "stlb_sets", "STLB_WAY": "stlb_assoc", "STLB_LATENCY": "stlb_latency",

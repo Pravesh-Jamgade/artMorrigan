@@ -9,6 +9,7 @@
 extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
 enum STLB_BLOCK_MODE { STLB_BLOCK_ANALYSIS, STLB_BLOCK_DETAIL };
+#define DEFAULT_STLB_BLOCK_MODE STLB_BLOCK_ANALYSIS
 extern STLB_BLOCK_MODE stlb_block_mode;
 bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 
