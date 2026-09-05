@@ -21,7 +21,7 @@ time_t start_time;
 
 // PAGE TABLE
 uint32_t PAGE_TABLE_LATENCY = 0, SWAP_LATENCY = 0;
-STLB_BLOCK_MODE stlb_block_mode = STLB_BLOCK_ANALYSIS;
+STLB_BLOCK_MODE stlb_block_mode = DEFAULT_STLB_BLOCK_MODE;
 queue <uint64_t > page_queue;
 map <uint64_t, uint64_t> page_table, inverse_table, recent_page, unique_cl[NUM_CPUS];
 uint64_t previous_ppage, num_adjacent_page, num_cl[NUM_CPUS], allocated_pages, num_page[NUM_CPUS], minor_fault[NUM_CPUS], major_fault[NUM_CPUS];
