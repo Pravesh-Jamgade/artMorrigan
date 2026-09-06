@@ -238,7 +238,26 @@ table. Every value is parsed from raw output files; nothing is hardcoded.
 
 ## Reading the raw output
 
-Per-trace files are `ChampSim-SC/Statistics/<config>/<trace>.txt`:
+Per-trace files are `ChampSim-SC/Statistics/<config>/<trace>.txt`. The runner
+also writes `<trace>.csv`, containing machine-readable scalar `key,value` rows.
+Vectors use two rows with the same key: a label row followed by its value row.
+When invoking a simulator binary directly, enable this output with
+`--stats_csv <path>`.
+
+For example:
+
+```csv
+Core_0_branch_types,NOT_BRANCH,BRANCH_DIRECT_JUMP,BRANCH_INDIRECT,BRANCH_CONDITIONAL,BRANCH_DIRECT_CALL,BRANCH_INDIRECT_CALL,BRANCH_RETURN,BRANCH_OTHER
+Core_0_branch_types,100,20,4,80,2,1,3,0
+Core_0_STLB_cache_footprint,0,1
+Core_0_STLB_cache_footprint,120,880
+Core_0_shadow_STLB_block_footprint,0,1,2,3,4
+Core_0_shadow_STLB_block_footprint,10,40,150,300,500
+Core_0_branch_pred_accuracy,92.89
+Core_0_branch_pred_mpki,12.10
+```
+
+The human-readable file includes:
 
 ```
 I-STLB MISSES: 96064          instruction STLB misses

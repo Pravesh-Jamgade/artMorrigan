@@ -1459,6 +1459,7 @@ void CACHE::handle_fill()
 			if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
 				entry.accessed_mask |= 1u << offset;
 				*ppn = entry.pte[offset];
+				entry.used_mask |= 1u << offset;
 				if (update_lru) {
 					for (uint32_t other = 0; other < NUM_WAY; ++other)
 						if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
@@ -1567,6 +1568,9 @@ void CACHE::handle_fill()
 			}
 		}
 #endif
+		if (cache_type == IS_STLB && block[set][way].valid)
+			stlb_cache_footprint[(block[set][way].used || !block[set][way].prefetch) ? 1 : 0]++;
+
 		if (block[set][way].prefetch && (block[set][way].used == 0))
 			pf_useless++;
 

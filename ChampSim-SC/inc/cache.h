@@ -338,6 +338,8 @@ class CACHE : public MEMORY {
 
 				total_miss_latency = 0;
 				stlb_block_hits = stlb_block_misses = 0;
+				for (uint32_t i = 0; i < 2; ++i) stlb_cache_footprint[i] = 0;
+				for (uint32_t i = 0; i < 5; ++i) shadow_stlb_footprint[i] = 0;
 
 				lower_level = NULL;
 				extra_interface = NULL;
