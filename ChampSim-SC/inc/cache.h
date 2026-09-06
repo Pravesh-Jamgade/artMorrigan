@@ -14,6 +14,7 @@ extern STLB_BLOCK_MODE stlb_block_mode;
 bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 
 #define P2TLB 0
+#define PTW_START_LEVEL 1 // 1: L1D, 2: L2C
 
 // Free Prefetching
 
@@ -134,8 +135,8 @@ class CACHE : public MEMORY {
 		struct STLB_BLOCK_ENTRY {
 			uint64_t tag, pte[4];
 			uint32_t lru;
-			uint8_t valid_mask, used_mask;
-			STLB_BLOCK_ENTRY() : tag(0), lru(0), valid_mask(0), used_mask(0) {
+			uint8_t valid_mask, accessed_mask;
+			STLB_BLOCK_ENTRY() : tag(0), lru(0), valid_mask(0), accessed_mask(0) {
 				for (int i = 0; i < 4; ++i) pte[i] = 0;
 			}
 		};
@@ -146,7 +147,8 @@ class CACHE : public MEMORY {
 		BLOCK **block;
 		STLB_BLOCK_ENTRY **stlb_block;
 		uint64_t stlb_block_hits, stlb_block_misses;
-		uint64_t stlb_cache_footprint[2], shadow_stlb_footprint[5];
+		uint64_t stlb_block_footprint[4], stlb_block_evictions;
+		uint64_t translation_footprint[8], translation_evictions;
 		int fill_level;
 		uint32_t MAX_READ, MAX_FILL;
 		uint32_t reads_available_this_cycle;
@@ -266,6 +268,10 @@ class CACHE : public MEMORY {
 				}
 
 				mmu_timer = 0;
+				translation_evictions = 0;
+				for (int i = 0; i < 8; ++i) translation_footprint[i] = 0;
+				stlb_block_evictions = 0;
+				for (int i = 0; i < 4; ++i) stlb_block_footprint[i] = 0;
 
 				for(int i=0; i<4; i++){
 					mmu_cache_demand_hits[i] = 0;
@@ -363,6 +369,7 @@ class CACHE : public MEMORY {
 		bool stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru = true);
 		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn);
 		void stlb_block_invalidate(uint64_t vpn);
+		void evict_stlb_block(STLB_BLOCK_ENTRY &entry);
 
 		int  add_rq(PACKET *packet),
 		     add_wq(PACKET *packet),
@@ -440,6 +447,8 @@ class CACHE : public MEMORY {
 			 lru_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type);
 
 		int * sorted_free_distances();
+		void mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address);
+		void evict_translation_block(uint32_t set, uint32_t way);
 
 		void issue_prefetches(int offset, uint64_t current_vpn, uint64_t ip, uint64_t instr_id, int iflag, int * free_indexes, uint8_t type, int answer);
 };

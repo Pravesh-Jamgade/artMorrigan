@@ -1431,6 +1431,24 @@ void CACHE::handle_fill()
 		return (uint32_t) (address & ((1 << lg2(NUM_SET)) - 1)); 
 	}
 
+	void CACHE::evict_translation_block(uint32_t set, uint32_t way)
+	{
+		uint8_t mask = block[set][way].translation_mask;
+		if (!block[set][way].valid || !mask)
+			return;
+		uint32_t footprint = 0;
+		for (; mask; mask >>= 1)
+			footprint += mask & 1;
+		translation_footprint[footprint - 1]++;
+		translation_evictions++;
+		block[set][way].translation_mask = 0;
+	}
+
+	void CACHE::mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address)
+	{
+		block[set][way].translation_mask |= 1u << ((pte_address >> 3) & 7);
+	}
+
 	bool CACHE::stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru)
 	{
 		const uint64_t block_vpn = vpn >> 2;
@@ -1439,6 +1457,7 @@ void CACHE::handle_fill()
 		for (uint32_t way = 0; way < NUM_WAY; ++way) {
 			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
 			if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
+				entry.accessed_mask |= 1u << offset;
 				*ppn = entry.pte[offset];
 				entry.used_mask |= 1u << offset;
 				if (update_lru) {
@@ -1467,14 +1486,13 @@ void CACHE::handle_fill()
 		}
 		if (way == NUM_WAY) way = 0;
 		STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
-		const bool replacing_block = entry.valid_mask && entry.tag != block_vpn;
-		if (replacing_block)
-			shadow_stlb_footprint[__builtin_popcount(entry.used_mask)]++;
-		if (!entry.valid_mask || replacing_block)
-			entry.used_mask = 0;
+		const bool replacing = entry.valid_mask && entry.tag != block_vpn;
+		if (replacing)
+			evict_stlb_block(entry);
 		entry.tag = block_vpn;
 		entry.valid_mask = 0;
-		entry.used_mask |= 1u << (vpn & 3);
+		if (replacing)
+			entry.accessed_mask = 0;
 		for (uint32_t offset = 0; offset < 4; ++offset) {
 			uint64_t ppn;
 			if (lookup_allocated_pte(owner_cpu, (block_vpn << 2) | offset, &ppn)) {
@@ -1482,6 +1500,7 @@ void CACHE::handle_fill()
 				entry.valid_mask |= 1u << offset;
 			}
 		}
+		entry.accessed_mask |= 1u << (vpn & 3);
 		for (uint32_t other = 0; other < NUM_WAY; ++other)
 			if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
 		entry.lru = 0;
@@ -1492,9 +1511,27 @@ void CACHE::handle_fill()
 		const uint64_t block_vpn = vpn >> 2;
 		const uint32_t offset = vpn & 3;
 		const uint32_t set = get_set(block_vpn);
-		for (uint32_t way = 0; way < NUM_WAY; ++way)
-			if (stlb_block[set][way].valid_mask && stlb_block[set][way].tag == block_vpn)
-				stlb_block[set][way].valid_mask &= ~(1u << offset);
+		for (uint32_t way = 0; way < NUM_WAY; ++way) {
+			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
+			if (entry.valid_mask && entry.tag == block_vpn) {
+				entry.valid_mask &= ~(1u << offset);
+				if (!entry.valid_mask)
+					evict_stlb_block(entry);
+			}
+		}
+	}
+
+	void CACHE::evict_stlb_block(STLB_BLOCK_ENTRY &entry)
+	{
+		uint8_t mask = entry.accessed_mask;
+		if (!mask)
+			return;
+		uint32_t footprint = 0;
+		for (; mask; mask >>= 1)
+			footprint += mask & 1;
+		stlb_block_footprint[footprint - 1]++;
+		stlb_block_evictions++;
+		entry.accessed_mask = 0;
 	}
 
 	uint32_t CACHE::get_way(uint64_t address, uint32_t set)
@@ -1509,6 +1546,7 @@ void CACHE::handle_fill()
 
 	void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 	{
+		evict_translation_block(set, way);
 		if (cache_type == IS_STLB)
 			stlb_block_fill(packet->cpu, packet->address);
 #ifdef SANITY_CHECK
@@ -1541,6 +1579,7 @@ void CACHE::handle_fill()
 		block[set][way].dirty = 0;
 		block[set][way].prefetch = (packet->type == PREFETCH) ? 1 : 0;
 		block[set][way].used = 0;
+		block[set][way].translation_mask = 0;
 
 		if (block[set][way].prefetch)
 			pf_fill++;
@@ -1637,7 +1676,7 @@ void CACHE::handle_fill()
 		// invalidate
 		for (uint32_t way=0; way<NUM_WAY; way++) {
 			if (block[set][way].valid && (block[set][way].tag == inval_addr)) {
-
+				evict_translation_block(set, way);
 				block[set][way].valid = 0;
 
 				match_way = way;
