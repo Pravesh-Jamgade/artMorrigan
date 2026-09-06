@@ -169,6 +169,34 @@ collecting shadow-structure statistics, and `detail` makes accesses use the
 four-PTE structure. The generated binary still accepts `--stlb_mode` to
 override its configured default for an individual simulation.
 
+### Page-walk cache level and translation-block footprint
+
+`simulator.ptw_start_level` selects `l1` (the default) or `l2`. An L2-starting
+page-table walker bypasses L1D lookup and allocation, and its reported walk
+stall omits `L1D_LATENCY`; lower-level hit and miss costs are unchanged. The
+same setting applies to demand and prefetch page walks. It can also be set for
+a one-off build with `--set simulator.ptw_start_level=l2` or the compatibility
+option `--ptw_start_level l2`.
+
+Page-table entries are modeled as 8-byte entries in 64-byte cache lines. For
+L1D, L2C, and LLC, the simulator tracks which of the eight PTE offsets in each
+resident translation block were accessed. On eviction it emits a histogram:
+
+```
+L1D TRANSLATION BLOCK EVICTIONS: <count>
+L1D TRANSLATION BLOCK FOOTPRINT (PTEs 1..8): <one> ... <eight>
+```
+
+Each bin counts evicted translation blocks with that many distinct PTEs
+accessed since the block was installed (or since ROI statistics were reset).
+The sum of the eight bins equals `TRANSLATION BLOCK EVICTIONS`. Prefetch page
+walk probes count as accesses when they hit a resident translation block.
+
+The four-PTE shadow STLB uses the same definition with four footprint bins.
+Its `SHADOW STLB BLOCK FOOTPRINT (PTEs 1..4)` histogram counts the distinct
+PTE offsets accessed before each shadow block is replaced or fully invalidated,
+in both `analysis` and `detail` modes.
+
 ## 5. test one trace 
 
 ```bash
