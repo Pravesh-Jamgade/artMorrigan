@@ -499,6 +499,7 @@ void CACHE::handle_fill()
 			int way = check_hit(&WQ.entry[index]);
 
 			if (way >= 0) { // writeback hit (or RFO hit for L1D)
+				mark_cache_access(set, way, WQ.entry[index].type, WQ.entry[index].full_addr);
 
 				if (cache_type == IS_LLC) {
 					llc_update_replacement_state(writeback_cpu, set, way, block[set][way].full_addr, WQ.entry[index].ip, 0, WQ.entry[index].type, 1);
@@ -804,6 +805,7 @@ void CACHE::handle_fill()
 
 
 				if (way >= 0) { // read hit
+					mark_cache_access(set, way, RQ.entry[index].type, RQ.entry[index].full_addr);
 
 					if (cache_type == IS_ITLB) {
 						RQ.entry[index].instruction_pa = block[set][way].data;
@@ -1214,6 +1216,7 @@ void CACHE::handle_fill()
 				int way = check_hit(&PQ.entry[index]);
 
 				if (way >= 0) { // prefetch hit
+					mark_cache_access(set, way, PQ.entry[index].type, PQ.entry[index].full_addr);
 
 					// update replacement policy
 					if (cache_type == IS_LLC) {
@@ -1431,22 +1434,42 @@ void CACHE::handle_fill()
 		return (uint32_t) (address & ((1 << lg2(NUM_SET)) - 1)); 
 	}
 
-	void CACHE::evict_translation_block(uint32_t set, uint32_t way)
+	static uint32_t footprint_size(uint8_t mask)
 	{
-		uint8_t mask = block[set][way].translation_mask;
-		if (!block[set][way].valid || !mask)
-			return;
 		uint32_t footprint = 0;
 		for (; mask; mask >>= 1)
 			footprint += mask & 1;
-		translation_footprint[footprint - 1]++;
-		translation_evictions++;
-		block[set][way].translation_mask = 0;
+		return footprint;
+	}
+
+	void CACHE::record_footprint_on_eviction(uint32_t set, uint32_t way)
+	{
+		BLOCK &victim = block[set][way];
+		if (!victim.valid)
+			return;
+		uint8_t masks[4] = {victim.access_footprint[LOAD], victim.access_footprint[RFO],
+			victim.access_footprint[PREFETCH], victim.translation_footprint};
+		for (uint32_t type = 0; type < 4; ++type) {
+			const uint32_t entries = footprint_size(masks[type]);
+			if (entries) {
+				footprint[type][entries - 1]++;
+				footprint_evictions[type]++;
+			}
+		}
+		victim.translation_footprint = 0;
+		for (uint32_t type = 0; type < 3; ++type)
+			victim.access_footprint[type] = 0;
 	}
 
 	void CACHE::mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address)
 	{
-		block[set][way].translation_mask |= 1u << ((pte_address >> 3) & 7);
+		block[set][way].translation_footprint |= 1u << ((pte_address >> 3) & 7);
+	}
+
+	void CACHE::mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address)
+	{
+		if ((cache_type == IS_L1D || cache_type == IS_L2C || cache_type == IS_LLC) && type <= PREFETCH)
+			block[set][way].access_footprint[type] |= 1u << ((byte_address >> 3) & 7);
 	}
 
 	bool CACHE::stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru)
@@ -1459,7 +1482,6 @@ void CACHE::handle_fill()
 			if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
 				entry.accessed_mask |= 1u << offset;
 				*ppn = entry.pte[offset];
-				entry.used_mask |= 1u << offset;
 				if (update_lru) {
 					for (uint32_t other = 0; other < NUM_WAY; ++other)
 						if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
@@ -1546,7 +1568,7 @@ void CACHE::handle_fill()
 
 	void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 	{
-		evict_translation_block(set, way);
+		record_footprint_on_eviction(set, way);
 		if (cache_type == IS_STLB)
 			stlb_block_fill(packet->cpu, packet->address);
 #ifdef SANITY_CHECK
@@ -1568,9 +1590,6 @@ void CACHE::handle_fill()
 			}
 		}
 #endif
-		if (cache_type == IS_STLB && block[set][way].valid)
-			stlb_cache_footprint[(block[set][way].used || !block[set][way].prefetch) ? 1 : 0]++;
-
 		if (block[set][way].prefetch && (block[set][way].used == 0))
 			pf_useless++;
 
@@ -1579,7 +1598,10 @@ void CACHE::handle_fill()
 		block[set][way].dirty = 0;
 		block[set][way].prefetch = (packet->type == PREFETCH) ? 1 : 0;
 		block[set][way].used = 0;
-		block[set][way].translation_mask = 0;
+		block[set][way].translation_footprint = 0;
+		for (uint32_t type = 0; type < 3; ++type)
+			block[set][way].access_footprint[type] = 0;
+		mark_cache_access(set, way, packet->type, packet->full_addr);
 
 		if (block[set][way].prefetch)
 			pf_fill++;
@@ -1676,7 +1698,7 @@ void CACHE::handle_fill()
 		// invalidate
 		for (uint32_t way=0; way<NUM_WAY; way++) {
 			if (block[set][way].valid && (block[set][way].tag == inval_addr)) {
-				evict_translation_block(set, way);
+				record_footprint_on_eviction(set, way);
 				block[set][way].valid = 0;
 
 				match_way = way;

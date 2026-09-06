@@ -12,7 +12,8 @@ class BLOCK {
 			prefetch,
 			dirty,
 			used,
-			translation_mask;
+			translation_footprint,
+			access_footprint[3];
 
 		int delta,
 		    depth,
@@ -36,7 +37,9 @@ class BLOCK {
 			prefetch = 0;
 			dirty = 0;
 			used = 0;
-			translation_mask = 0;
+			translation_footprint = 0;
+			for (int i = 0; i < 3; ++i)
+				access_footprint[i] = 0;
 
 			delta = 0;
 			depth = 0;

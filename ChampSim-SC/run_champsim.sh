@@ -22,6 +22,5 @@ fi
 
 (./bin/${binary} -warmup_instructions ${n_warm}000000 \
                  -simulation_instructions ${n_sim}000000 ${extra} \
-                 -stats_csv "${DESTINATION_FOLDER}/${option}/${trace}.csv" \
                  -traces ${TRACE_DIR}/${trace}.champsimtrace.xz) \
     &> ${DESTINATION_FOLDER}/${option}/${trace}.txt
