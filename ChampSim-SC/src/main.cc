@@ -19,16 +19,15 @@ uint64_t warmup_instructions     = 1000000,
 
 time_t start_time;
 
-static string stats_csv_path;
 
 template <typename T>
-void write_csv_scalar(ofstream& csv, const string& key, const T& value)
+void write_csv_scalar(ostream& csv, const string& key, const T& value)
 {
 	csv << key << ',' << value << '\n';
 }
 
 template <typename Labels, typename Values>
-void write_csv_vector(ofstream& csv, const string& key, const Labels& labels, const Values& values)
+void write_csv_vector(ostream& csv, const string& key, const Labels& labels, const Values& values)
 {
 	csv << key;
 	for (const auto& label : labels)
@@ -41,16 +40,11 @@ void write_csv_vector(ofstream& csv, const string& key, const Labels& labels, co
 
 void write_csv_stats()
 {
-	if (stats_csv_path.empty())
-		return;
-
-	ofstream csv(stats_csv_path);
-	if (!csv) {
-		cerr << "Unable to open CSV statistics file: " << stats_csv_path << endl;
-		exit(EXIT_FAILURE);
-	}
-
+	ostream& csv = cout;
+	csv << "CSV_STATS_BEGIN\n";
 	csv << fixed << setprecision(2);
+	const vector<string> cache_labels{"1", "2", "3", "4", "5", "6", "7", "8"};
+	const vector<string> footprint_names{"load", "rfo", "prefetch", "translation"};
 	for (uint32_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
 		const string prefix = "Core_" + to_string(cpu) + '_';
 		const double instructions = ooo_cpu[cpu].finish_sim_instr;
@@ -67,13 +61,26 @@ void write_csv_stats()
 			vector<string>{"NOT_BRANCH", "BRANCH_DIRECT_JUMP", "BRANCH_INDIRECT", "BRANCH_CONDITIONAL",
 				"BRANCH_DIRECT_CALL", "BRANCH_INDIRECT_CALL", "BRANCH_RETURN", "BRANCH_OTHER"},
 			ooo_cpu[cpu].total_branch_types);
+
+		CACHE *levels[] = {&ooo_cpu[cpu].L1D, &ooo_cpu[cpu].L2C};
+		for (CACHE *level : levels)
+			for (uint32_t type = 0; type < 4; ++type) {
+				const string key = prefix + level->NAME + '_' + footprint_names[type];
+				write_csv_scalar(csv, key + "_footprint_evictions", level->footprint_evictions[type]);
+				write_csv_vector(csv, key + "_footprint", cache_labels, level->footprint[type]);
+			}
 		write_csv_scalar(csv, prefix + "STLB_block_hits", ooo_cpu[cpu].STLB.stlb_block_hits);
 		write_csv_scalar(csv, prefix + "STLB_block_misses", ooo_cpu[cpu].STLB.stlb_block_misses);
-		write_csv_vector(csv, prefix + "STLB_cache_footprint", vector<string>{"0", "1"},
-			ooo_cpu[cpu].STLB.stlb_cache_footprint);
-		write_csv_vector(csv, prefix + "shadow_STLB_block_footprint", vector<string>{"0", "1", "2", "3", "4"},
-			ooo_cpu[cpu].STLB.shadow_stlb_footprint);
+		write_csv_scalar(csv, prefix + "STLB_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
+		write_csv_vector(csv, prefix + "STLB_block_footprint", vector<string>{"1", "2", "3", "4"},
+			ooo_cpu[cpu].STLB.stlb_block_footprint);
 	}
+	for (uint32_t type = 0; type < 4; ++type) {
+		const string key = "LLC_" + footprint_names[type];
+		write_csv_scalar(csv, key + "_footprint_evictions", uncore.LLC.footprint_evictions[type]);
+		write_csv_vector(csv, key + "_footprint", cache_labels, uncore.LLC.footprint[type]);
+	}
+	csv << "CSV_STATS_END\n";
 }
 
 // PAGE TABLE
@@ -143,10 +150,10 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 		cout << endl;
 	}
 	if (cache->cache_type == IS_L1D || cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
-		cout << cache->NAME << " TRANSLATION BLOCK EVICTIONS: " << cache->translation_evictions << endl;
-		cout << cache->NAME << " TRANSLATION BLOCK FOOTPRINT (PTEs 1..8):";
+		cout << cache->NAME << " TRANSLATION BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;
+		cout << cache->NAME << " TRANSLATION BLOCK FOOTPRINT (8-byte entries 1..8):";
 		for (int footprint = 0; footprint < 8; ++footprint)
-			cout << ' ' << cache->translation_footprint[footprint];
+			cout << ' ' << cache->footprint[3][footprint];
 		cout << endl;
 	}
 	//cout << " AVERAGE MISS LATENCY: " << (cache->total_miss_latency)/TOTAL_MISS << " cycles " << cache->total_miss_latency << "/" << TOTAL_MISS<< endl;
@@ -235,12 +242,18 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 	}
 
 	cache->total_miss_latency = 0;
-	cache->translation_evictions = 0;
-	for (int footprint = 0; footprint < 8; ++footprint)
-		cache->translation_footprint[footprint] = 0;
+	for (int type = 0; type < 4; ++type) {
+		cache->footprint_evictions[type] = 0;
+		for (int entry_count = 0; entry_count < 8; ++entry_count)
+			cache->footprint[type][entry_count] = 0;
+	}
 	for (uint32_t set = 0; set < cache->NUM_SET; ++set)
 		for (uint32_t way = 0; way < cache->NUM_WAY; ++way)
-			cache->block[set][way].translation_mask = 0;
+		{
+			cache->block[set][way].translation_footprint = 0;
+			for (int type = 0; type < 3; ++type)
+				cache->block[set][way].access_footprint[type] = 0;
+		}
 
 	cache->RQ.ACCESS = 0;
 	cache->RQ.MERGED = 0;
@@ -722,7 +735,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					if(!magic && PTW_START_LEVEL == 1){
 						way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, pml42s, type);
 
-						ooo_cpu[cpu].L1D.evict_translation_block(set, way_fill);
+						ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
 						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, pml42s, ip, 0, type, 0);
 
 						if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0)
@@ -759,7 +772,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						if(!magic){
 							way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, pml42s, type);
 
-							ooo_cpu[cpu].L2C.evict_translation_block(set, way_fill);
+							ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
 							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, pml42s, ip, 0, type, 0);
 
 							if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0)
@@ -795,7 +808,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							if(!magic){
 								way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, pml42s, type);
 
-								uncore.LLC.evict_translation_block(set, way_fill);
+								uncore.LLC.record_footprint_on_eviction(set, way_fill);
 								uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, pml42s, ip, 0, type, 0);
 
 								if (uncore.LLC.block[set][way_fill].valid == 0)
@@ -842,7 +855,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					if(!magic && PTW_START_LEVEL == 1){
 						way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, pdp2s, type);
 
-						ooo_cpu[cpu].L1D.evict_translation_block(set, way_fill);
+						ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
 						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, pdp2s, ip, ooo_cpu[cpu].L1D.block[set][way_fill].full_addr, type, 0);
 
 						if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0)
@@ -878,7 +891,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						if(!magic){
 							way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, pdp2s, type);
 
-							ooo_cpu[cpu].L2C.evict_translation_block(set, way_fill);
+							ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
 							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, pdp2s, ip, ooo_cpu[cpu].L2C.block[set][way_fill].full_addr, type, 0);
 
 							if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0)
@@ -914,7 +927,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							if(!magic){
 								way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, pdp2s, type);
 
-								uncore.LLC.evict_translation_block(set, way_fill);
+								uncore.LLC.record_footprint_on_eviction(set, way_fill);
 								uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, pdp2s, ip, uncore.LLC.block[set][way_fill].full_addr, type, 0);
 
 								if (uncore.LLC.block[set][way_fill].valid == 0)
@@ -961,7 +974,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					if(!magic && PTW_START_LEVEL == 1){
 						way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, pd2s, type);
 
-						ooo_cpu[cpu].L1D.evict_translation_block(set, way_fill);
+						ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
 						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, pd2s, ip, ooo_cpu[cpu].L1D.block[set][way_fill].full_addr, type, 0);
 
 						if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0)
@@ -997,7 +1010,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						if(!magic){
 							way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, pd2s, type);
 
-							ooo_cpu[cpu].L2C.evict_translation_block(set, way_fill);
+							ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
 							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, pd2s, ip, ooo_cpu[cpu].L2C.block[set][way_fill].full_addr, type, 0);
 
 							if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0)
@@ -1033,7 +1046,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							if(!magic){
 								way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, pd2s, type);
 
-								uncore.LLC.evict_translation_block(set, way_fill);
+								uncore.LLC.record_footprint_on_eviction(set, way_fill);
 								uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, pd2s, ip, uncore.LLC.block[set][way_fill].full_addr, type, 0);
 
 								if (uncore.LLC.block[set][way_fill].valid == 0)
@@ -1085,7 +1098,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 				if(!magic){
 					way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, pt2s, type);
 
-					ooo_cpu[cpu].L1D.evict_translation_block(set, way_fill);
+					ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
 					ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, pt2s, ip, ooo_cpu[cpu].L1D.block[set][way_fill].full_addr, type, 0);
 
 					if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0)
@@ -1121,7 +1134,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					if(!magic){
 						way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, pt2s, type);
 
-						ooo_cpu[cpu].L2C.evict_translation_block(set, way_fill);
+						ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
 						ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, pt2s, ip, ooo_cpu[cpu].L2C.block[set][way_fill].full_addr, type, 0);
 
 						if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0)
@@ -1157,7 +1170,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						if(!magic){
 							way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, pt2s, type);
 
-							uncore.LLC.evict_translation_block(set, way_fill);
+							uncore.LLC.record_footprint_on_eviction(set, way_fill);
 							uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, pt2s, ip, uncore.LLC.block[set][way_fill].full_addr, type, 0);
 
 							if (uncore.LLC.block[set][way_fill].valid == 0)
@@ -1546,7 +1559,6 @@ int main(int argc, char** argv)
 			{"low_bandwidth",  no_argument, 0, 'b'},
 			{"traces",  no_argument, 0, 't'},
 			{"stlb_mode", required_argument, 0, 'S'},
-			{"stats_csv", required_argument, 0, 'C'},
 			{0, 0, 0, 0}      
 		};
 
@@ -1589,9 +1601,6 @@ int main(int argc, char** argv)
 					cerr << "Invalid --stlb_mode (expected analysis or detail): " << optarg << endl;
 					return 1;
 				}
-				break;
-			case 'C':
-				stats_csv_path = optarg;
 				break;
 			default:
 				abort();

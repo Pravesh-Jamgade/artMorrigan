@@ -169,7 +169,7 @@ collecting shadow-structure statistics, and `detail` makes accesses use the
 four-PTE structure. The generated binary still accepts `--stlb_mode` to
 override its configured default for an individual simulation.
 
-### Page-walk cache level and translation-block footprint
+### Page-walk cache level and cache-block footprint
 
 `simulator.ptw_start_level` selects `l1` (the default) or `l2`. An L2-starting
 page-table walker bypasses L1D lookup and allocation, and its reported walk
@@ -178,24 +178,17 @@ same setting applies to demand and prefetch page walks. It can also be set for
 a one-off build with `--set simulator.ptw_start_level=l2` or the compatibility
 option `--ptw_start_level l2`.
 
-Page-table entries are modeled as 8-byte entries in 64-byte cache lines. For
-L1D, L2C, and LLC, the simulator tracks which of the eight PTE offsets in each
-resident translation block were accessed. On eviction it emits a histogram:
+Every 64-byte L1D, L2C, and LLC block is divided into eight 8-byte entries.
+During the block's lifetime the simulator maintains independent masks for
+load, RFO, prefetch, and page-table-translation accesses. When the block is
+evicted or invalidated, each non-empty mask increments the histogram bin for
+its number of distinct entries. Translation accesses are explicitly marked by
+the page-table walker rather than inferred from the ordinary request type.
+The masks and histograms are reset at the beginning of the ROI.
 
-```
-L1D TRANSLATION BLOCK EVICTIONS: <count>
-L1D TRANSLATION BLOCK FOOTPRINT (PTEs 1..8): <one> ... <eight>
-```
-
-Each bin counts evicted translation blocks with that many distinct PTEs
-accessed since the block was installed (or since ROI statistics were reset).
-The sum of the eight bins equals `TRANSLATION BLOCK EVICTIONS`. Prefetch page
-walk probes count as accesses when they hit a resident translation block.
-
-The four-PTE shadow STLB uses the same definition with four footprint bins.
-Its `SHADOW STLB BLOCK FOOTPRINT (PTEs 1..4)` histogram counts the distinct
-PTE offsets accessed before each shadow block is replaced or fully invalidated,
-in both `analysis` and `detail` modes.
+The block STLB similarly tracks four 8-byte PTE positions. Its four-bin
+histogram is updated when a block is replaced or fully invalidated in either
+`analysis` or `detail` mode.
 
 ## 5. test one trace 
 
@@ -238,23 +231,24 @@ table. Every value is parsed from raw output files; nothing is hardcoded.
 
 ## Reading the raw output
 
-Per-trace files are `ChampSim-SC/Statistics/<config>/<trace>.txt`. The runner
-also writes `<trace>.csv`, containing machine-readable scalar `key,value` rows.
-Vectors use two rows with the same key: a label row followed by its value row.
-When invoking a simulator binary directly, enable this output with
-`--stats_csv <path>`.
+Per-trace files are `ChampSim-SC/Statistics/<config>/<trace>.txt`. CSV-formatted
+statistics are printed directly to standard output between `CSV_STATS_BEGIN`
+and `CSV_STATS_END`; no separate CSV file or command-line option is needed.
+Scalar values use `key,value` rows. Histograms use two rows with the same key:
+a bin-label row followed by its values.
 
 For example:
 
 ```csv
-Core_0_branch_types,NOT_BRANCH,BRANCH_DIRECT_JUMP,BRANCH_INDIRECT,BRANCH_CONDITIONAL,BRANCH_DIRECT_CALL,BRANCH_INDIRECT_CALL,BRANCH_RETURN,BRANCH_OTHER
-Core_0_branch_types,100,20,4,80,2,1,3,0
-Core_0_STLB_cache_footprint,0,1
-Core_0_STLB_cache_footprint,120,880
-Core_0_shadow_STLB_block_footprint,0,1,2,3,4
-Core_0_shadow_STLB_block_footprint,10,40,150,300,500
+CSV_STATS_BEGIN
 Core_0_branch_pred_accuracy,92.89
-Core_0_branch_pred_mpki,12.10
+Core_0_L1D_load_footprint,1,2,3,4,5,6,7,8
+Core_0_L1D_load_footprint,120,80,30,15,8,4,2,1
+Core_0_STLB_block_footprint,1,2,3,4
+Core_0_STLB_block_footprint,40,150,300,500
+LLC_translation_footprint,1,2,3,4,5,6,7,8
+LLC_translation_footprint,10,20,30,40,50,60,70,80
+CSV_STATS_END
 ```
 
 The human-readable file includes:

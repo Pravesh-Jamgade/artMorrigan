@@ -148,7 +148,9 @@ class CACHE : public MEMORY {
 		STLB_BLOCK_ENTRY **stlb_block;
 		uint64_t stlb_block_hits, stlb_block_misses;
 		uint64_t stlb_block_footprint[4], stlb_block_evictions;
-		uint64_t translation_footprint[8], translation_evictions;
+		// Histograms are indexed by footprint - 1. Cache lines contain eight
+		// independently tracked 8-byte entries.
+		uint64_t footprint[4][8], footprint_evictions[4];
 		int fill_level;
 		uint32_t MAX_READ, MAX_FILL;
 		uint32_t reads_available_this_cycle;
@@ -268,8 +270,10 @@ class CACHE : public MEMORY {
 				}
 
 				mmu_timer = 0;
-				translation_evictions = 0;
-				for (int i = 0; i < 8; ++i) translation_footprint[i] = 0;
+				for (int type = 0; type < 4; ++type) {
+					footprint_evictions[type] = 0;
+					for (int i = 0; i < 8; ++i) footprint[type][i] = 0;
+				}
 				stlb_block_evictions = 0;
 				for (int i = 0; i < 4; ++i) stlb_block_footprint[i] = 0;
 
@@ -338,8 +342,6 @@ class CACHE : public MEMORY {
 
 				total_miss_latency = 0;
 				stlb_block_hits = stlb_block_misses = 0;
-				for (uint32_t i = 0; i < 2; ++i) stlb_cache_footprint[i] = 0;
-				for (uint32_t i = 0; i < 5; ++i) shadow_stlb_footprint[i] = 0;
 
 				lower_level = NULL;
 				extra_interface = NULL;
@@ -448,7 +450,8 @@ class CACHE : public MEMORY {
 
 		int * sorted_free_distances();
 		void mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address);
-		void evict_translation_block(uint32_t set, uint32_t way);
+		void mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address);
+		void record_footprint_on_eviction(uint32_t set, uint32_t way);
 
 		void issue_prefetches(int offset, uint64_t current_vpn, uint64_t ip, uint64_t instr_id, int iflag, int * free_indexes, uint8_t type, int answer);
 };
