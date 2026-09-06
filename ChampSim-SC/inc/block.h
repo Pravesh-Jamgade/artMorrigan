@@ -11,7 +11,8 @@ class BLOCK {
 		uint8_t valid,
 			prefetch,
 			dirty,
-			used;
+			used,
+			translation_mask;
 
 		int delta,
 		    depth,
@@ -35,6 +36,7 @@ class BLOCK {
 			prefetch = 0;
 			dirty = 0;
 			used = 0;
+			translation_mask = 0;
 
 			delta = 0;
 			depth = 0;
