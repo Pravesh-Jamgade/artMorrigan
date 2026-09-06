@@ -1440,6 +1440,7 @@ void CACHE::handle_fill()
 			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
 			if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
 				*ppn = entry.pte[offset];
+				entry.used_mask |= 1u << offset;
 				if (update_lru) {
 					for (uint32_t other = 0; other < NUM_WAY; ++other)
 						if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
@@ -1466,8 +1467,14 @@ void CACHE::handle_fill()
 		}
 		if (way == NUM_WAY) way = 0;
 		STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
+		const bool replacing_block = entry.valid_mask && entry.tag != block_vpn;
+		if (replacing_block)
+			shadow_stlb_footprint[__builtin_popcount(entry.used_mask)]++;
+		if (!entry.valid_mask || replacing_block)
+			entry.used_mask = 0;
 		entry.tag = block_vpn;
 		entry.valid_mask = 0;
+		entry.used_mask |= 1u << (vpn & 3);
 		for (uint32_t offset = 0; offset < 4; ++offset) {
 			uint64_t ppn;
 			if (lookup_allocated_pte(owner_cpu, (block_vpn << 2) | offset, &ppn)) {
@@ -1523,6 +1530,9 @@ void CACHE::handle_fill()
 			}
 		}
 #endif
+		if (cache_type == IS_STLB && block[set][way].valid)
+			stlb_cache_footprint[(block[set][way].used || !block[set][way].prefetch) ? 1 : 0]++;
+
 		if (block[set][way].prefetch && (block[set][way].used == 0))
 			pf_useless++;
 

@@ -134,8 +134,8 @@ class CACHE : public MEMORY {
 		struct STLB_BLOCK_ENTRY {
 			uint64_t tag, pte[4];
 			uint32_t lru;
-			uint8_t valid_mask;
-			STLB_BLOCK_ENTRY() : tag(0), lru(0), valid_mask(0) {
+			uint8_t valid_mask, used_mask;
+			STLB_BLOCK_ENTRY() : tag(0), lru(0), valid_mask(0), used_mask(0) {
 				for (int i = 0; i < 4; ++i) pte[i] = 0;
 			}
 		};
@@ -146,6 +146,7 @@ class CACHE : public MEMORY {
 		BLOCK **block;
 		STLB_BLOCK_ENTRY **stlb_block;
 		uint64_t stlb_block_hits, stlb_block_misses;
+		uint64_t stlb_cache_footprint[2], shadow_stlb_footprint[5];
 		int fill_level;
 		uint32_t MAX_READ, MAX_FILL;
 		uint32_t reads_available_this_cycle;
@@ -331,6 +332,8 @@ class CACHE : public MEMORY {
 
 				total_miss_latency = 0;
 				stlb_block_hits = stlb_block_misses = 0;
+				for (uint32_t i = 0; i < 2; ++i) stlb_cache_footprint[i] = 0;
+				for (uint32_t i = 0; i < 5; ++i) shadow_stlb_footprint[i] = 0;
 
 				lower_level = NULL;
 				extra_interface = NULL;

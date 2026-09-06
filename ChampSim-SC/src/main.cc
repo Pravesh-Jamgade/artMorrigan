@@ -19,6 +19,63 @@ uint64_t warmup_instructions     = 1000000,
 
 time_t start_time;
 
+static string stats_csv_path;
+
+template <typename T>
+void write_csv_scalar(ofstream& csv, const string& key, const T& value)
+{
+	csv << key << ',' << value << '\n';
+}
+
+template <typename Labels, typename Values>
+void write_csv_vector(ofstream& csv, const string& key, const Labels& labels, const Values& values)
+{
+	csv << key;
+	for (const auto& label : labels)
+		csv << ',' << label;
+	csv << '\n' << key;
+	for (const auto& value : values)
+		csv << ',' << value;
+	csv << '\n';
+}
+
+void write_csv_stats()
+{
+	if (stats_csv_path.empty())
+		return;
+
+	ofstream csv(stats_csv_path);
+	if (!csv) {
+		cerr << "Unable to open CSV statistics file: " << stats_csv_path << endl;
+		exit(EXIT_FAILURE);
+	}
+
+	csv << fixed << setprecision(2);
+	for (uint32_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
+		const string prefix = "Core_" + to_string(cpu) + '_';
+		const double instructions = ooo_cpu[cpu].finish_sim_instr;
+		const double accuracy = ooo_cpu[cpu].num_branch == 0 ? 0.0 :
+			100.0 * (ooo_cpu[cpu].num_branch - ooo_cpu[cpu].branch_mispredictions) / ooo_cpu[cpu].num_branch;
+		const double mpki = instructions == 0 ? 0.0 : 1000.0 * ooo_cpu[cpu].branch_mispredictions / instructions;
+
+		write_csv_scalar(csv, prefix + "ipc", ooo_cpu[cpu].finish_sim_cycle == 0 ? 0.0 : instructions / ooo_cpu[cpu].finish_sim_cycle);
+		write_csv_scalar(csv, prefix + "instructions", ooo_cpu[cpu].finish_sim_instr);
+		write_csv_scalar(csv, prefix + "cycles", ooo_cpu[cpu].finish_sim_cycle);
+		write_csv_scalar(csv, prefix + "branch_pred_accuracy", accuracy);
+		write_csv_scalar(csv, prefix + "branch_pred_mpki", mpki);
+		write_csv_vector(csv, prefix + "branch_types",
+			vector<string>{"NOT_BRANCH", "BRANCH_DIRECT_JUMP", "BRANCH_INDIRECT", "BRANCH_CONDITIONAL",
+				"BRANCH_DIRECT_CALL", "BRANCH_INDIRECT_CALL", "BRANCH_RETURN", "BRANCH_OTHER"},
+			ooo_cpu[cpu].total_branch_types);
+		write_csv_scalar(csv, prefix + "STLB_block_hits", ooo_cpu[cpu].STLB.stlb_block_hits);
+		write_csv_scalar(csv, prefix + "STLB_block_misses", ooo_cpu[cpu].STLB.stlb_block_misses);
+		write_csv_vector(csv, prefix + "STLB_cache_footprint", vector<string>{"0", "1"},
+			ooo_cpu[cpu].STLB.stlb_cache_footprint);
+		write_csv_vector(csv, prefix + "shadow_STLB_block_footprint", vector<string>{"0", "1", "2", "3", "4"},
+			ooo_cpu[cpu].STLB.shadow_stlb_footprint);
+	}
+}
+
 // PAGE TABLE
 uint32_t PAGE_TABLE_LATENCY = 0, SWAP_LATENCY = 0;
 STLB_BLOCK_MODE stlb_block_mode = DEFAULT_STLB_BLOCK_MODE;
@@ -209,6 +266,10 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->stlb_misses[1] = 0;
 		cache->stlb_block_hits = 0;
 		cache->stlb_block_misses = 0;
+		for (uint32_t footprint = 0; footprint < 2; ++footprint)
+			cache->stlb_cache_footprint[footprint] = 0;
+		for (uint32_t footprint = 0; footprint < 5; ++footprint)
+			cache->shadow_stlb_footprint[footprint] = 0;
 
 		cache->bpbp[0] = 0;
 		cache->bpbp[1] = 0;
@@ -1403,6 +1464,7 @@ int main(int argc, char** argv)
 			{"low_bandwidth",  no_argument, 0, 'b'},
 			{"traces",  no_argument, 0, 't'},
 			{"stlb_mode", required_argument, 0, 'S'},
+			{"stats_csv", required_argument, 0, 'C'},
 			{0, 0, 0, 0}      
 		};
 
@@ -1445,6 +1507,9 @@ int main(int argc, char** argv)
 					cerr << "Invalid --stlb_mode (expected analysis or detail): " << optarg << endl;
 					return 1;
 				}
+				break;
+			case 'C':
+				stats_csv_path = optarg;
 				break;
 			default:
 				abort();
@@ -1866,6 +1931,7 @@ int main(int argc, char** argv)
 	print_dram_stats();
 	print_branch_stats();
 #endif
+	write_csv_stats();
 
 	return 0;
 }
