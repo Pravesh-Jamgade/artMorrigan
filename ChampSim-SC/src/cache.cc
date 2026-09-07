@@ -1442,6 +1442,17 @@ void CACHE::handle_fill()
 		return footprint;
 	}
 
+	static uint32_t rrc_bucket(uint64_t count)
+	{
+		uint32_t bucket = 0;
+		uint64_t bound = 1;
+		while (bound < count && bucket < 5) {
+			bound <<= 1;
+			bucket++;
+		}
+		return bucket;
+	}
+
 	void CACHE::record_footprint_on_eviction(uint32_t set, uint32_t way)
 	{
 		BLOCK &victim = block[set][way];
@@ -1456,20 +1467,34 @@ void CACHE::handle_fill()
 				footprint_evictions[type]++;
 			}
 		}
+		if (victim.rereference_count) {
+			const uint32_t bucket = rrc_bucket(victim.rereference_count);
+			rrc[bucket]++;
+			const uint32_t translation_entries = footprint_size(victim.translation_footprint);
+			if ((cache_type == IS_L2C || cache_type == IS_LLC) && translation_entries)
+				translation_rrc_footprint[bucket][translation_entries - 1]++;
+		}
+		victim.rereference_count = 0;
 		victim.translation_footprint = 0;
 		for (uint32_t type = 0; type < 3; ++type)
 			victim.access_footprint[type] = 0;
 	}
 
-	void CACHE::mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address)
+	void CACHE::mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, bool rereference)
 	{
 		block[set][way].translation_footprint |= 1u << ((pte_address >> 3) & 7);
+		if (rereference)
+			block[set][way].rereference_count++;
+		else
+			block[set][way].rereference_count = 0;
 	}
 
-	void CACHE::mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address)
+	void CACHE::mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address, bool rereference)
 	{
 		if ((cache_type == IS_L1D || cache_type == IS_L2C || cache_type == IS_LLC) && type <= PREFETCH)
 			block[set][way].access_footprint[type] |= 1u << ((byte_address >> 3) & 7);
+		if (rereference)
+			block[set][way].rereference_count++;
 	}
 
 	bool CACHE::stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru)
@@ -1601,7 +1626,8 @@ void CACHE::handle_fill()
 		block[set][way].translation_footprint = 0;
 		for (uint32_t type = 0; type < 3; ++type)
 			block[set][way].access_footprint[type] = 0;
-		mark_cache_access(set, way, packet->type, packet->full_addr);
+		block[set][way].rereference_count = 0;
+		mark_cache_access(set, way, packet->type, packet->full_addr, false);
 
 		if (block[set][way].prefetch)
 			pf_fill++;

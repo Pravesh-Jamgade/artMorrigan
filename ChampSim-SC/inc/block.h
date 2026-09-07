@@ -27,7 +27,8 @@ class BLOCK {
 			 ip,
 			 cpu,
 			 instr_id,
-			 stalls;
+			 stalls,
+			 rereference_count;
 
 		// replacement state
 		uint32_t lru;
@@ -56,6 +57,7 @@ class BLOCK {
 			lru = 0;
 
 			stalls=0;
+			rereference_count = 0;
 		};
 };
 
