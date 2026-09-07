@@ -131,7 +131,7 @@ class ooo_model_instr {
     uint64_t branch_target;
 
     uint32_t fetched, scheduled;
-    int num_reg_ops, num_mem_ops, num_reg_dependent;
+    int num_reg_ops, num_mem_ops, num_reg_dependent, num_lsq_dependent;
 
     // executed bit is set after all dependencies are eliminated and this instr is chosen on a cycle, according to EXEC_WIDTH
     int executed;
@@ -209,6 +209,7 @@ class ooo_model_instr {
         num_reg_ops = 0;
         num_mem_ops = 0;
         num_reg_dependent = 0;
+        num_lsq_dependent = 0;
 
         for (uint32_t i=0; i<NUM_INSTR_SOURCES; i++) {
             source_registers[i] = 0;
