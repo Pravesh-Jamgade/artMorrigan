@@ -151,6 +151,8 @@ class CACHE : public MEMORY {
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
 		// independently tracked 8-byte entries.
 		uint64_t footprint[4][8], footprint_evictions[4];
+		// Re-reference counts are bucketed at 1, 2, 4, 8, 16, and 32+.
+		uint64_t rrc[6], translation_rrc_footprint[6][8];
 		int fill_level;
 		uint32_t MAX_READ, MAX_FILL;
 		uint32_t reads_available_this_cycle;
@@ -276,6 +278,10 @@ class CACHE : public MEMORY {
 				}
 				stlb_block_evictions = 0;
 				for (int i = 0; i < 4; ++i) stlb_block_footprint[i] = 0;
+				for (int i = 0; i < 6; ++i) {
+					rrc[i] = 0;
+					for (int j = 0; j < 8; ++j) translation_rrc_footprint[i][j] = 0;
+				}
 
 				for(int i=0; i<4; i++){
 					mmu_cache_demand_hits[i] = 0;
@@ -449,8 +455,8 @@ class CACHE : public MEMORY {
 			 lru_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type);
 
 		int * sorted_free_distances();
-		void mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address);
-		void mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address);
+		void mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, bool rereference = true);
+		void mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address, bool rereference = true);
 		void record_footprint_on_eviction(uint32_t set, uint32_t way);
 
 		void issue_prefetches(int offset, uint64_t current_vpn, uint64_t ip, uint64_t instr_id, int iflag, int * free_indexes, uint8_t type, int answer);

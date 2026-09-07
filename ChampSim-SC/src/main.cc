@@ -45,6 +45,8 @@ void write_csv_stats()
 	csv << fixed << setprecision(2);
 	const vector<string> cache_labels{"1", "2", "3", "4", "5", "6", "7", "8"};
 	const vector<string> footprint_names{"load", "rfo", "prefetch", "translation"};
+	const vector<string> rrc_labels{"1", "2", "4", "8", "16", "32"};
+	csv << "cache,cpu,accesses,hits,misses,MPKI,miss_rate\n";
 	for (uint32_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
 		const string prefix = "Core_" + to_string(cpu) + '_';
 		const double instructions = ooo_cpu[cpu].finish_sim_instr;
@@ -62,6 +64,22 @@ void write_csv_stats()
 				"BRANCH_DIRECT_CALL", "BRANCH_INDIRECT_CALL", "BRANCH_RETURN", "BRANCH_OTHER"},
 			ooo_cpu[cpu].total_branch_types);
 
+		CACHE *reported_levels[] = {&ooo_cpu[cpu].L1D, &ooo_cpu[cpu].L1I, &ooo_cpu[cpu].L2C,
+			&ooo_cpu[cpu].ITLB, &ooo_cpu[cpu].DTLB, &ooo_cpu[cpu].STLB, &uncore.LLC};
+		for (CACHE *level : reported_levels) {
+			uint64_t accesses = 0, hits = 0, misses = 0;
+			for (uint32_t type = 0; type < NUM_TYPES; ++type) {
+				accesses += level->roi_access[cpu][type];
+				hits += level->roi_hit[cpu][type];
+				misses += level->roi_miss[cpu][type];
+			}
+			csv << level->NAME << ',' << cpu << ',' << accesses << ',' << hits << ',' << misses << ','
+				<< (instructions == 0 ? 0.0 : 1000.0 * misses / instructions) << ','
+				<< (accesses == 0 ? 0.0 : 100.0 * misses / accesses) << '\n';
+			if (level->cache_type != IS_LLC)
+				write_csv_vector(csv, prefix + level->NAME + "_rrc", rrc_labels, level->rrc);
+		}
+
 		CACHE *levels[] = {&ooo_cpu[cpu].L1D, &ooo_cpu[cpu].L2C};
 		for (CACHE *level : levels)
 			for (uint32_t type = 0; type < 4; ++type) {
@@ -74,11 +92,40 @@ void write_csv_stats()
 		write_csv_scalar(csv, prefix + "STLB_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
 		write_csv_vector(csv, prefix + "STLB_block_footprint", vector<string>{"1", "2", "3", "4"},
 			ooo_cpu[cpu].STLB.stlb_block_footprint);
+
+		const char *page_levels[] = {"levelPML4_hits", "levelPDP_hits", "levelPD_hits", "levelPT_hits"};
+		for (uint32_t page_level = 0; page_level < 4; ++page_level) {
+			const uint64_t *hits = ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[page_level];
+			csv << "PTW," << cpu << ',' << page_levels[page_level] << ",pwc,l1d,l1i,l2c,llc,dram\n";
+			csv << "PTW," << cpu << ',' << page_levels[page_level] << ",0," << hits[0]
+				<< ",0," << hits[1] << ',' << hits[2] << ',' << hits[3] << '\n';
+		}
+
+		CACHE *translation_levels[] = {&ooo_cpu[cpu].L2C};
+		for (CACHE *level : translation_levels) {
+			csv << "RRC_FOOTPRINT," << level->NAME << ",cpu," << cpu << '\n';
+			csv << "rrc,1,2,3,4,5,6,7,8\n";
+			for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+				csv << "rrc" << rrc_labels[bucket];
+				for (uint32_t footprint = 0; footprint < 8; ++footprint)
+					csv << ',' << level->translation_rrc_footprint[bucket][footprint];
+				csv << '\n';
+			}
+		}
 	}
 	for (uint32_t type = 0; type < 4; ++type) {
 		const string key = "LLC_" + footprint_names[type];
 		write_csv_scalar(csv, key + "_footprint_evictions", uncore.LLC.footprint_evictions[type]);
 		write_csv_vector(csv, key + "_footprint", cache_labels, uncore.LLC.footprint[type]);
+	}
+	write_csv_vector(csv, "LLC_rrc", rrc_labels, uncore.LLC.rrc);
+	csv << "RRC_FOOTPRINT," << uncore.LLC.NAME << '\n';
+	csv << "rrc,1,2,3,4,5,6,7,8\n";
+	for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+		csv << "rrc" << rrc_labels[bucket];
+		for (uint32_t footprint = 0; footprint < 8; ++footprint)
+			csv << ',' << uncore.LLC.translation_rrc_footprint[bucket][footprint];
+		csv << '\n';
 	}
 	csv << "CSV_STATS_END\n";
 }
@@ -247,9 +294,15 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		for (int entry_count = 0; entry_count < 8; ++entry_count)
 			cache->footprint[type][entry_count] = 0;
 	}
+	for (int bucket = 0; bucket < 6; ++bucket) {
+		cache->rrc[bucket] = 0;
+		for (int footprint = 0; footprint < 8; ++footprint)
+			cache->translation_rrc_footprint[bucket][footprint] = 0;
+	}
 	for (uint32_t set = 0; set < cache->NUM_SET; ++set)
 		for (uint32_t way = 0; way < cache->NUM_WAY; ++way)
 		{
+			cache->block[set][way].rereference_count = 0;
 			cache->block[set][way].translation_footprint = 0;
 			for (int type = 0; type < 3; ++type)
 				cache->block[set][way].access_footprint[type] = 0;
@@ -748,7 +801,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pml42s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pml42s);
+						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pml42s, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
 						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 					}
@@ -785,7 +838,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pml42s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pml42s);
+							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pml42s, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
 							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 						}
@@ -821,7 +874,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pml42s;
-								uncore.LLC.mark_translation_access(set, way_fill, pml42s);
+								uncore.LLC.mark_translation_access(set, way_fill, pml42s, false);
 								uncore.LLC.block[set][way_fill].data = 55;
 								uncore.LLC.block[set][way_fill].cpu = cpu;
 							}
@@ -868,7 +921,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pdp2s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pdp2s);
+						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pdp2s, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
 						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 					}
@@ -904,7 +957,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pdp2s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pdp2s);
+							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pdp2s, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
 							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 						}
@@ -940,7 +993,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pdp2s;
-								uncore.LLC.mark_translation_access(set, way_fill, pdp2s);
+								uncore.LLC.mark_translation_access(set, way_fill, pdp2s, false);
 								uncore.LLC.block[set][way_fill].data = 55;
 								uncore.LLC.block[set][way_fill].cpu = cpu;
 							}
@@ -987,7 +1040,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pd2s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pd2s);
+						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pd2s, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
 						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 					}
@@ -1023,7 +1076,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pd2s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pd2s);
+							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pd2s, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
 							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 						}
@@ -1059,7 +1112,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pd2s;
-								uncore.LLC.mark_translation_access(set, way_fill, pd2s);
+								uncore.LLC.mark_translation_access(set, way_fill, pd2s, false);
 								uncore.LLC.block[set][way_fill].data = 55;
 								uncore.LLC.block[set][way_fill].cpu = cpu;
 							}
@@ -1111,7 +1164,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					ooo_cpu[cpu].L1D.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
 					ooo_cpu[cpu].L1D.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 					ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pt2s;
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pt2s);
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pt2s, false);
 					ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
 					ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 				}
@@ -1147,7 +1200,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L2C.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L2C.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pt2s;
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pt2s);
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pt2s, false);
 						ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
 						ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 					}
@@ -1183,7 +1236,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							uncore.LLC.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
 							uncore.LLC.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 							uncore.LLC.block[set][way_fill].full_addr = pt2s;
-							uncore.LLC.mark_translation_access(set, way_fill, pt2s);
+							uncore.LLC.mark_translation_access(set, way_fill, pt2s, false);
 							uncore.LLC.block[set][way_fill].data = 55;
 							uncore.LLC.block[set][way_fill].cpu = cpu;
 						}
