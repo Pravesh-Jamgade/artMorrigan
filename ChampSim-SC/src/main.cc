@@ -97,13 +97,14 @@ void write_csv_stats()
 		for (uint32_t page_level = 0; page_level < 4; ++page_level) {
 			const uint64_t *hits = ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[page_level];
 			csv << "PTW," << cpu << ',' << page_levels[page_level] << ",pwc,l1d,l1i,l2c,llc,dram\n";
-			csv << "PTW," << cpu << ',' << page_levels[page_level] << ",0," << hits[0]
+			csv << "PTW," << cpu << ',' << page_levels[page_level] << ','
+				<< ooo_cpu[cpu].STLB.pagetable_pwc_hits[page_level] << ',' << hits[0]
 				<< ",0," << hits[1] << ',' << hits[2] << ',' << hits[3] << '\n';
 		}
 
 		CACHE *translation_levels[] = {&ooo_cpu[cpu].L2C};
 		for (CACHE *level : translation_levels) {
-			csv << "RRC_FOOTPRINT," << level->NAME << ",cpu," << cpu << '\n';
+			csv << "RRC_FOOTPRINT," << level->NAME << ",cpu," << cpu << ",ptw_level,pt\n";
 			csv << "rrc,1,2,3,4,5,6,7,8\n";
 			for (uint32_t bucket = 0; bucket < 6; ++bucket) {
 				csv << "rrc" << rrc_labels[bucket];
@@ -119,13 +120,15 @@ void write_csv_stats()
 		write_csv_vector(csv, key + "_footprint", cache_labels, uncore.LLC.footprint[type]);
 	}
 	write_csv_vector(csv, "LLC_rrc", rrc_labels, uncore.LLC.rrc);
-	csv << "RRC_FOOTPRINT," << uncore.LLC.NAME << '\n';
-	csv << "rrc,1,2,3,4,5,6,7,8\n";
-	for (uint32_t bucket = 0; bucket < 6; ++bucket) {
-		csv << "rrc" << rrc_labels[bucket];
-		for (uint32_t footprint = 0; footprint < 8; ++footprint)
-			csv << ',' << uncore.LLC.translation_rrc_footprint[bucket][footprint];
-		csv << '\n';
+	{
+		csv << "RRC_FOOTPRINT," << uncore.LLC.NAME << ",ptw_level,pt\n";
+		csv << "rrc,1,2,3,4,5,6,7,8\n";
+		for (uint32_t bucket = 0; bucket < 6; ++bucket) {
+			csv << "rrc" << rrc_labels[bucket];
+			for (uint32_t footprint = 0; footprint < 8; ++footprint)
+				csv << ',' << uncore.LLC.translation_rrc_footprint[bucket][footprint];
+			csv << '\n';
+		}
 	}
 	csv << "CSV_STATS_END\n";
 }
@@ -197,8 +200,8 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 		cout << endl;
 	}
 	if (cache->cache_type == IS_L1D || cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
-		cout << cache->NAME << " TRANSLATION BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;
-		cout << cache->NAME << " TRANSLATION BLOCK FOOTPRINT (8-byte entries 1..8):";
+		cout << cache->NAME << " PT PTE BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;
+		cout << cache->NAME << " PT PTE BLOCK FOOTPRINT (8-byte entries 1..8):";
 		for (int footprint = 0; footprint < 8; ++footprint)
 			cout << ' ' << cache->footprint[3][footprint];
 		cout << endl;
@@ -303,7 +306,9 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		for (uint32_t way = 0; way < cache->NUM_WAY; ++way)
 		{
 			cache->block[set][way].rereference_count = 0;
+			cache->block[set][way].ptw_level = UINT8_MAX;
 			cache->block[set][way].translation_footprint = 0;
+			cache->block[set][way].translation_rereference_count = 0;
 			for (int type = 0; type < 3; ++type)
 				cache->block[set][way].access_footprint[type] = 0;
 		}
@@ -342,6 +347,7 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->rfhits[1] = 0;
 
 		for(int ii=0; ii<4; ii++){
+			cache->pagetable_pwc_hits[ii] = 0;
 			for(int jj=0; jj<4; jj++){
 				cache->pagetable_mr_hit_ratio[ii][jj] = 0;
 			}
@@ -508,6 +514,28 @@ uint64_t rotr64 (uint64_t n, unsigned int c)
 }
 
 RANDOM champsim_rand(champsim_seed);
+
+void issue_ptw_dram_read(uint32_t cpu, uint64_t address, uint64_t instr_id, uint64_t ip,
+	uint8_t type, uint8_t ptw_level)
+{
+	PACKET packet;
+	packet.address = address >> LOG2_BLOCK_SIZE;
+	packet.full_addr = address;
+	packet.cpu = cpu;
+	packet.instr_id = instr_id;
+	packet.ip = ip;
+	packet.type = type;
+	packet.is_data = 0;
+	packet.is_ptw = 1;
+	packet.ptw_level = ptw_level;
+	packet.fill_level = FILL_DRAM;
+	packet.event_cycle = current_core_cycle[cpu];
+
+	if (uncore.DRAM.get_occupancy(1, packet.address) < uncore.DRAM.get_size(1, packet.address))
+		uncore.DRAM.add_rq(&packet);
+	else
+		uncore.DRAM.RQ[uncore.DRAM.dram_get_channel(packet.address)].FULL++;
+}
 
 
 pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t unique_vpage, uint64_t ip, int type, int iflag, bool magic)
@@ -701,6 +729,9 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 			stall_cycle[cpu] = current_core_cycle[cpu] + SWAP_LATENCY;
 	}
 	else{
+		for (uint32_t level = 0; level < 3; ++level)
+			if (mmu_hit[level])
+				ooo_cpu[cpu].STLB.pagetable_pwc_hits[level]++;
 		uint64_t cr3 = 0x200000;
 
 		uint64_t pt_index, pd_index, pdp_index, pml4_index;
@@ -775,7 +806,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
 				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pml42s);
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pml42s, 0);
+					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][0]++;
 					if(!magic){
 						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, 0, type, 1);
 						ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
@@ -801,7 +833,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pml42s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pml42s, false);
+						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pml42s, 0, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
 						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 					}
@@ -810,9 +842,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 
 					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pml42s);
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][1]++;
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pml42s, 0);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][1]++;
 						if(!magic){
 							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, 0, type, 1);
 							ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
@@ -838,7 +869,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pml42s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pml42s, false);
+							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pml42s, 0, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
 							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 						}
@@ -846,9 +877,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						set = uncore.LLC.get_set(pml42s >> LOG2_BLOCK_SIZE);
 						way_read = uncore.LLC.check_hit(&search_packet);
 						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pml42s);
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][2]++;
+							uncore.LLC.mark_translation_access(set, way_read, pml42s, 0);
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][2]++;
 							if(!magic){
 								uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
 								uncore.LLC.block[set][way_read].used = 1;
@@ -874,13 +904,13 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pml42s;
-								uncore.LLC.mark_translation_access(set, way_fill, pml42s, false);
+								uncore.LLC.mark_translation_access(set, way_fill, pml42s, 0, false);
 								uncore.LLC.block[set][way_fill].data = 55;
 								uncore.LLC.block[set][way_fill].cpu = cpu;
 							}
 
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][3]++;
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][3]++;
+							issue_ptw_dram_read(cpu, pml42s, instr_id, ip, type, 0);
 							cstall += 200;
 						}
 					}
@@ -895,7 +925,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
 				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pdp2s);
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pdp2s, 1);
+					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][0]++;
 					if(!magic){
 						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, type, type, 1);
 						ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
@@ -921,7 +952,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pdp2s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pdp2s, false);
+						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pdp2s, 1, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
 						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 					}
@@ -929,9 +960,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					set = ooo_cpu[cpu].L2C.get_set(pdp2s >> LOG2_BLOCK_SIZE);
 					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pdp2s);
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][1]++;
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pdp2s, 1);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][1]++;
 						if(!magic){
 							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, type, type, 1);
 							ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
@@ -957,7 +987,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pdp2s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pdp2s, false);
+							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pdp2s, 1, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
 							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 						}
@@ -965,9 +995,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						set = uncore.LLC.get_set(pdp2s >> LOG2_BLOCK_SIZE);
 						way_read = uncore.LLC.check_hit(&search_packet);
 						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pdp2s);
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][2]++;
+							uncore.LLC.mark_translation_access(set, way_read, pdp2s, 1);
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][2]++;
 							if(!magic){
 								uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
 								uncore.LLC.block[set][way_read].used = 1;
@@ -993,12 +1022,12 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pdp2s;
-								uncore.LLC.mark_translation_access(set, way_fill, pdp2s, false);
+								uncore.LLC.mark_translation_access(set, way_fill, pdp2s, 1, false);
 								uncore.LLC.block[set][way_fill].data = 55;
 								uncore.LLC.block[set][way_fill].cpu = cpu;
 							}
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][3]++;
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][3]++;
+							issue_ptw_dram_read(cpu, pdp2s, instr_id, ip, type, 1);
 							cstall += 200;
 						}
 					}
@@ -1014,7 +1043,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
 				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pd2s);
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pd2s, 2);
+					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][0]++;
 					if(!magic){
 						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, type, type, 1);
 						ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
@@ -1040,7 +1070,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pd2s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pd2s, false);
+						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pd2s, 2, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
 						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 					}
@@ -1048,9 +1078,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					set = ooo_cpu[cpu].L2C.get_set(pd2s >> LOG2_BLOCK_SIZE);
 					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pd2s);
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][1]++;
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pd2s, 2);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][1]++;
 						if(!magic){
 							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, type, type, 1);
 							ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
@@ -1076,7 +1105,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pd2s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pd2s, false);
+							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pd2s, 2, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
 							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 						}
@@ -1084,9 +1113,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						set = uncore.LLC.get_set(pd2s >> LOG2_BLOCK_SIZE);
 						way_read = uncore.LLC.check_hit(&search_packet);
 						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pd2s);
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][2]++;
+							uncore.LLC.mark_translation_access(set, way_read, pd2s, 2);
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][2]++;
 							if(!magic){
 								uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
 								uncore.LLC.block[set][way_read].used = 1;
@@ -1112,12 +1140,12 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pd2s;
-								uncore.LLC.mark_translation_access(set, way_fill, pd2s, false);
+								uncore.LLC.mark_translation_access(set, way_fill, pd2s, 2, false);
 								uncore.LLC.block[set][way_fill].data = 55;
 								uncore.LLC.block[set][way_fill].cpu = cpu;
 							}
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][3]++;
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][3]++;
+							issue_ptw_dram_read(cpu, pd2s, instr_id, ip, type, 2);
 							cstall += 200;
 						}
 					}
@@ -1138,7 +1166,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 			way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
 			if(way_read >=0){
-				ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pt2s);
+				ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pt2s, 3);
+				ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][0]++;
 				if(!magic){
 					ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, type, type, 1);
 					ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
@@ -1164,7 +1193,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					ooo_cpu[cpu].L1D.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
 					ooo_cpu[cpu].L1D.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 					ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pt2s;
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pt2s, false);
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pt2s, 3, false);
 					ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
 					ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 				}
@@ -1172,9 +1201,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 				set = ooo_cpu[cpu].L2C.get_set(pt2s >> LOG2_BLOCK_SIZE);
 				way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 				if(way_read >=0){
-					ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pt2s);
-					if (iflag)
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][1]++;
+					ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pt2s, 3);
+					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][1]++;
 					if(!magic){
 						ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, type, type, 1);
 						ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
@@ -1200,7 +1228,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L2C.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L2C.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pt2s;
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pt2s, false);
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pt2s, 3, false);
 						ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
 						ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 					}
@@ -1208,9 +1236,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					set = uncore.LLC.get_set(pt2s >> LOG2_BLOCK_SIZE);
 					way_read = uncore.LLC.check_hit(&search_packet);
 					if(way_read >=0){
-						uncore.LLC.mark_translation_access(set, way_read, pt2s);
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][2]++;
+						uncore.LLC.mark_translation_access(set, way_read, pt2s, 3);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][2]++;
 						if(!magic){
 							uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
 							uncore.LLC.block[set][way_read].used = 1;
@@ -1236,13 +1263,13 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							uncore.LLC.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
 							uncore.LLC.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 							uncore.LLC.block[set][way_fill].full_addr = pt2s;
-							uncore.LLC.mark_translation_access(set, way_fill, pt2s, false);
+							uncore.LLC.mark_translation_access(set, way_fill, pt2s, 3, false);
 							uncore.LLC.block[set][way_fill].data = 55;
 							uncore.LLC.block[set][way_fill].cpu = cpu;
 						}
 
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][3]++;
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][3]++;
+						issue_ptw_dram_read(cpu, pt2s, instr_id, ip, type, 3);
 						cstall += 200;
 					}
 				}
@@ -1397,9 +1424,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 				set = ooo_cpu[cpu].L1D.get_set(pml42s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pml42s);
-					if (iflag)
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][0]++;
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pml42s, 0);
+					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][0]++;
 					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
 				}
 				else{
@@ -1408,9 +1434,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 					set = ooo_cpu[cpu].L2C.get_set(pml42s >> LOG2_BLOCK_SIZE);
 					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pml42s);
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][1]++;
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pml42s, 0);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][1]++;
 						cstall += L2C_LATENCY;
 					}
 					else{
@@ -1419,16 +1444,15 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 						set = uncore.LLC.get_set(pml42s >> LOG2_BLOCK_SIZE);
 						way_read = uncore.LLC.check_hit(&search_packet);
 						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pml42s);
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][2]++;
+							uncore.LLC.mark_translation_access(set, way_read, pml42s, 0);
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][2]++;
 							cstall += LLC_LATENCY;
 						}
 						else{
 							cstall += LLC_LATENCY;
 
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][3]++;
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][3]++;
+							issue_ptw_dram_read(cpu, pml42s, 0, ip, 0, 0);
 							cstall += 200;
 						}
 					}
@@ -1442,9 +1466,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 				set = ooo_cpu[cpu].L1D.get_set(pdp2s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pdp2s);
-					if (iflag)
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][0]++;
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pdp2s, 1);
+					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][0]++;
 					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
 				}
 				else{
@@ -1452,9 +1475,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 					set = ooo_cpu[cpu].L2C.get_set(pdp2s >> LOG2_BLOCK_SIZE);
 					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pdp2s);
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][1]++;
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pdp2s, 1);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][1]++;
 						cstall+=L2C_LATENCY;
 					}
 					else{
@@ -1463,17 +1485,16 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 						set = uncore.LLC.get_set(pdp2s >> LOG2_BLOCK_SIZE);
 						way_read = uncore.LLC.check_hit(&search_packet);
 						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pdp2s);
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][2]++;
+							uncore.LLC.mark_translation_access(set, way_read, pdp2s, 1);
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][2]++;
 							cstall += LLC_LATENCY;
 						}
 						else{
 							cstall += LLC_LATENCY;
 
 							cstall += 200;
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][3]++;
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][3]++;
+							issue_ptw_dram_read(cpu, pdp2s, 0, ip, 0, 1);
 						}
 					}
 				}
@@ -1486,9 +1507,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 				set = ooo_cpu[cpu].L1D.get_set(pd2s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pd2s);
-					if (iflag)
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][0]++;
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pd2s, 2);
+					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][0]++;
 					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
 				}
 				else{
@@ -1497,9 +1517,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 					set = ooo_cpu[cpu].L2C.get_set(pd2s >> LOG2_BLOCK_SIZE);
 					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pd2s);
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][1]++;
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pd2s, 2);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][1]++;
 						cstall+=L2C_LATENCY;
 					}
 					else{
@@ -1508,17 +1527,16 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 						set = uncore.LLC.get_set(pd2s >> LOG2_BLOCK_SIZE);
 						way_read = uncore.LLC.check_hit(&search_packet);
 						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pd2s);
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][2]++;
+							uncore.LLC.mark_translation_access(set, way_read, pd2s, 2);
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][2]++;
 							cstall += LLC_LATENCY;
 						}
 						else{
 							cstall += LLC_LATENCY;
 
 							cstall += 200;
-							if (iflag)
-								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][3]++;
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][3]++;
+							issue_ptw_dram_read(cpu, pd2s, 0, ip, 0, 2);
 						}
 					}
 				}
@@ -1531,7 +1549,7 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 			set = ooo_cpu[cpu].L1D.get_set(pt2s >> LOG2_BLOCK_SIZE);
 			way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 			if(way_read >=0){
-				ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pt2s);
+				ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pt2s, 3);
 				if (iflag) {
 					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][0]++;
 				}
@@ -1543,9 +1561,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 				set = ooo_cpu[cpu].L2C.get_set(pt2s >> LOG2_BLOCK_SIZE);
 				way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 				if(way_read >=0){
-					ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pt2s);
-					if (iflag)
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][1]++;
+					ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pt2s, 3);
+					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][1]++;
 					cstall+=L2C_LATENCY;
 				}
 				else{
@@ -1554,16 +1571,15 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 					set = uncore.LLC.get_set(pt2s >> LOG2_BLOCK_SIZE);
 					way_read = uncore.LLC.check_hit(&search_packet);
 					if(way_read >=0){
-						uncore.LLC.mark_translation_access(set, way_read, pt2s);
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][2]++;
+						uncore.LLC.mark_translation_access(set, way_read, pt2s, 3);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][2]++;
 						cstall += LLC_LATENCY;
 					}
 					else{
 						cstall += LLC_LATENCY;
 
-						if (iflag)
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][3]++;
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][3]++;
+						issue_ptw_dram_read(cpu, pt2s, 0, ip, 0, 3);
 						cstall += 200;
 					}
 				}
@@ -1586,6 +1602,8 @@ void cpu_l1i_prefetcher_cache_fill(uint32_t cpu_num, uint64_t addr, uint32_t set
 
 int main(int argc, char** argv)
 {
+	cout << "Source commit: " << CHAMPSIM_GIT_COMMIT << '\n'
+	     << "Source branch: " << CHAMPSIM_GIT_BRANCH << '\n';
 	// interrupt signal hanlder
 	struct sigaction sigIntHandler;
 	sigIntHandler.sa_handler = signal_handler;

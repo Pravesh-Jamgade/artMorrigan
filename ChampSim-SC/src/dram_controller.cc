@@ -331,7 +331,11 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
                 cout << " current_cycle: " << current_core_cycle[op_cpu] << " event_cycle: " << queue->entry[request_index].event_cycle << endl; });
 
                 // send data back to the core cache hierarchy
-                upper_level_dcache[op_cpu]->return_data(&queue->entry[request_index]);
+                // The legacy PTW obtains the translation synchronously, but its
+                // backing read still participates in DRAM scheduling.  It has no
+                // cache MSHR waiting for a data callback.
+                if (!queue->entry[request_index].is_ptw)
+                    upper_level_dcache[op_cpu]->return_data(&queue->entry[request_index]);
 
                 if (bank_request[op_channel][op_rank][op_bank].row_buffer_hit)
                     queue->ROW_BUFFER_HIT++;
@@ -417,6 +421,8 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
 {
     // simply return read requests with dummy response before the warmup
     if (all_warmup_complete < NUM_CPUS) {
+		if (packet->is_ptw)
+			return -1;
         if (packet->instruction) 
             upper_level_icache[packet->cpu]->return_data(packet);
         if (packet->is_data)

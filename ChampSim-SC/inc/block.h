@@ -12,6 +12,7 @@ class BLOCK {
 			prefetch,
 			dirty,
 			used,
+			ptw_level,
 			translation_footprint,
 			access_footprint[3];
 
@@ -28,7 +29,8 @@ class BLOCK {
 			 cpu,
 			 instr_id,
 			 stalls,
-			 rereference_count;
+			 rereference_count,
+			 translation_rereference_count;
 
 		// replacement state
 		uint32_t lru;
@@ -38,7 +40,9 @@ class BLOCK {
 			prefetch = 0;
 			dirty = 0;
 			used = 0;
+			ptw_level = UINT8_MAX;
 			translation_footprint = 0;
+			translation_rereference_count = 0;
 			for (int i = 0; i < 3; ++i)
 				access_footprint[i] = 0;
 
@@ -76,6 +80,8 @@ class PACKET {
 	public:
 		uint8_t instruction, 
 			is_data,
+			is_ptw,
+			ptw_level,
 			fill_l1i,
 			fill_l1d,
 			tlb_access,
@@ -134,6 +140,8 @@ class PACKET {
 			 PACKET() {
 				 instruction = 0;
 				 is_data = 1;
+				 is_ptw = 0;
+				 ptw_level = UINT8_MAX;
 				 fill_l1i = 0;
 				 fill_l1d = 0;
 				 tlb_access = 0;
