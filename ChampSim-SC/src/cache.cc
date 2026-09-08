@@ -1467,26 +1467,41 @@ void CACHE::handle_fill()
 				footprint_evictions[type]++;
 			}
 		}
+		const uint32_t translation_entries = footprint_size(victim.translation_footprint);
+		if (victim.translation_rereference_count && translation_entries &&
+		    (cache_type == IS_L2C || cache_type == IS_LLC)) {
+			const uint32_t bucket = rrc_bucket(victim.translation_rereference_count);
+			translation_rrc_footprint[bucket][translation_entries - 1]++;
+		}
 		if (victim.rereference_count) {
 			const uint32_t bucket = rrc_bucket(victim.rereference_count);
 			rrc[bucket]++;
-			const uint32_t translation_entries = footprint_size(victim.translation_footprint);
-			if ((cache_type == IS_L2C || cache_type == IS_LLC) && translation_entries)
-				translation_rrc_footprint[bucket][translation_entries - 1]++;
 		}
 		victim.rereference_count = 0;
+		victim.ptw_level = UINT8_MAX;
 		victim.translation_footprint = 0;
+		victim.translation_rereference_count = 0;
 		for (uint32_t type = 0; type < 3; ++type)
 			victim.access_footprint[type] = 0;
 	}
 
-	void CACHE::mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, bool rereference)
+	void CACHE::mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, uint8_t ptw_level, bool rereference)
 	{
+		assert(ptw_level < 4);
+		block[set][way].ptw_level = ptw_level;
+		// Only the leaf PT contains translation PTEs. Upper-level radix entries
+		// retain their level metadata but must not contribute to translation
+		// footprint or translation re-reference metrics.
+		if (ptw_level != 3)
+			return;
 		block[set][way].translation_footprint |= 1u << ((pte_address >> 3) & 7);
-		if (rereference)
+		if (rereference) {
 			block[set][way].rereference_count++;
-		else
+			block[set][way].translation_rereference_count++;
+		} else {
 			block[set][way].rereference_count = 0;
+			block[set][way].translation_rereference_count = 0;
+		}
 	}
 
 	void CACHE::mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address, bool rereference)
@@ -1623,7 +1638,9 @@ void CACHE::handle_fill()
 		block[set][way].dirty = 0;
 		block[set][way].prefetch = (packet->type == PREFETCH) ? 1 : 0;
 		block[set][way].used = 0;
+		block[set][way].ptw_level = UINT8_MAX;
 		block[set][way].translation_footprint = 0;
+		block[set][way].translation_rereference_count = 0;
 		for (uint32_t type = 0; type < 3; ++type)
 			block[set][way].access_footprint[type] = 0;
 		block[set][way].rereference_count = 0;

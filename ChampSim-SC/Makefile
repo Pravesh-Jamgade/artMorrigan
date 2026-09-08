@@ -9,6 +9,11 @@ inc = inc
 debug = 1
 
 CFlags = -Wall -O3 -std=c++11
+# Capture the source revision when make starts.  The escaped quotes make these
+# values safe C string literals, including the detached-HEAD case.
+GIT_COMMIT := $(shell git rev-parse --verify HEAD 2>/dev/null || echo unknown)
+GIT_BRANCH := $(shell git symbolic-ref --short -q HEAD 2>/dev/null || echo detached)
+CFlags += -DCHAMPSIM_GIT_COMMIT=\"$(GIT_COMMIT)\" -DCHAMPSIM_GIT_BRANCH=\"$(GIT_BRANCH)\"
 LDFlags =
 libs =
 libDir =

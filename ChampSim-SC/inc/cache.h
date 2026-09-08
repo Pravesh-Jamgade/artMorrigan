@@ -213,6 +213,7 @@ class CACHE : public MEMORY {
 		uint64_t mmu_timer;
 
 		uint64_t pagetable_mr_hit_ratio[4][4];
+		uint64_t pagetable_pwc_hits[4];
 		uint64_t rfhits[2];
 		uint64_t free_hits[14];
 
@@ -289,6 +290,7 @@ class CACHE : public MEMORY {
 				}
 
 				for(int i=0; i<4; i++){
+					pagetable_pwc_hits[i] = 0;
 					for(int j=0; j<4; j++){
 						pagetable_mr_hit_ratio[i][j] = 0;
 					}
@@ -455,7 +457,7 @@ class CACHE : public MEMORY {
 			 lru_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type);
 
 		int * sorted_free_distances();
-		void mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, bool rereference = true);
+		void mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, uint8_t ptw_level, bool rereference = true);
 		void mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address, bool rereference = true);
 		void record_footprint_on_eviction(uint32_t set, uint32_t way);
 
