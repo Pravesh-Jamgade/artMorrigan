@@ -93,6 +93,9 @@ bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 #define STLB_PQ_SIZE 64
 #define STLB_MSHR_SIZE 4
 #define STLB_LATENCY 8
+// Number of adjacent page-table entries represented by one detail-mode STLB
+// block. Supported values are powers of two so VPN decomposition is cheap.
+#define STLB_PTES_PER_BLOCK 4
 
 // L1 INSTRUCTION CACHE
 #define L1I_SET 64
@@ -133,11 +136,11 @@ bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 class CACHE : public MEMORY {
 	public:
 		struct STLB_BLOCK_ENTRY {
-			uint64_t tag, pte[4];
+			uint64_t tag, pte[STLB_PTES_PER_BLOCK];
 			uint32_t lru;
 			uint8_t valid_mask, accessed_mask;
 			STLB_BLOCK_ENTRY() : tag(0), lru(0), valid_mask(0), accessed_mask(0) {
-				for (int i = 0; i < 4; ++i) pte[i] = 0;
+				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) pte[i] = 0;
 			}
 		};
 		uint32_t cpu;
@@ -147,7 +150,7 @@ class CACHE : public MEMORY {
 		BLOCK **block;
 		STLB_BLOCK_ENTRY **stlb_block;
 		uint64_t stlb_block_hits, stlb_block_misses;
-		uint64_t stlb_block_footprint[4], stlb_block_evictions;
+		uint64_t stlb_block_footprint[STLB_PTES_PER_BLOCK], stlb_block_evictions;
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
 		// independently tracked 8-byte entries.
 		uint64_t footprint[4][8], footprint_evictions[4];
@@ -278,7 +281,7 @@ class CACHE : public MEMORY {
 					for (int i = 0; i < 8; ++i) footprint[type][i] = 0;
 				}
 				stlb_block_evictions = 0;
-				for (int i = 0; i < 4; ++i) stlb_block_footprint[i] = 0;
+				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) stlb_block_footprint[i] = 0;
 				for (int i = 0; i < 6; ++i) {
 					rrc[i] = 0;
 					for (int j = 0; j < 8; ++j) translation_rrc_footprint[i][j] = 0;
