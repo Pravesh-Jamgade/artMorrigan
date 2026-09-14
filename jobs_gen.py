@@ -1,50 +1,63 @@
+#!/usr/bin/env python3
+"""Generate shell job commands for a ChampSim binary from a .tlist file."""
+
+import argparse
 import os
-import sys
+import re
+import shlex
+from pathlib import Path
 
-# Ensure proper command-line arguments are provided
-if len(sys.argv) < 4:
-    print(f"Usage: python {sys.argv[0]} <path_to_config_file> <binary_path> <warmup_instructions> <simulation_instructions>")
-    sys.exit(1)
 
-CONFIG_FILE = sys.argv[1]
-EXEC_PATH = sys.argv[2]
-WARMUP = sys.argv[3]
-SIM = sys.argv[4]
+def arguments():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("benchmark_file", type=Path)
+    parser.add_argument("binary", type=Path, help="generated ChampSim binary")
+    parser.add_argument("warmup_instructions", type=int)
+    parser.add_argument("simulation_instructions", type=int)
+    parser.add_argument("--trace-dir", type=Path,
+                        help="replace any $(..._TRACE) prefix (default: TRACE_DIR or HERMES_TRACE)")
+    parser.add_argument("--output-dir", type=Path,
+                        help="log directory (default: binary filename)")
+    return parser.parse_args()
 
-# Define the trace directory variable that matches the config format
-TRACE_DIR = "/mnt/usb-Samsung_PSSD_T9_S743NS0X301609D-0:0-part1/pravesh"
 
-# Extract the binary name from the path to use as the output directory (e.g., ./bin/foo -> foo)
-BIN_NAME = os.path.basename(EXEC_PATH)
+def read_traces(path):
+    if not path.is_file():
+        raise SystemExit(f"benchmark file not found: {path}")
+    traces = []
+    for number, raw in enumerate(path.read_text().splitlines(), 1):
+        line = raw.strip()
+        if line.startswith("TRACE="):
+            trace = line.split("=", 1)[1].strip().strip('"\'')
+            if not trace:
+                raise SystemExit(f"empty TRACE at {path}:{number}")
+            traces.append(trace)
+    if not traces:
+        raise SystemExit(f"no TRACE= entries found in {path}")
+    return traces
 
-# Create the directory named after the binary if it doesn't exist
-os.makedirs(BIN_NAME, exist_ok=True)
 
-# Read and parse traces from the given config file
-traces = []
-if os.path.exists(CONFIG_FILE):
-    with open(CONFIG_FILE, "r") as f:
-        for line in f:
-            if line.startswith("TRACE="):
-                trace_path = line.strip().split("=", 1)[1]
-                # Replace $(TRACE_DIR) with the actual expanded path variable
-                trace_path = trace_path.replace("$(TRACE_DIR)", TRACE_DIR)
-                traces.append(trace_path)
-else:
-    print(f"Error: Config file '{CONFIG_FILE}' not found.")
-    sys.exit(1)
+def main():
+    args = arguments()
+    binary = args.binary.resolve()
+    if not binary.is_file():
+        raise SystemExit(f"binary not found: {binary}")
+    trace_dir = args.trace_dir or os.environ.get("TRACE_DIR") or os.environ.get("HERMES_TRACE")
+    output = args.output_dir or Path(binary.name)
+    print(f"mkdir -p {shlex.quote(str(output))}")
+    for trace in read_traces(args.benchmark_file):
+        if trace_dir:
+            trace = re.sub(r"^\$\([A-Za-z0-9_]*TRACE\)", str(trace_dir), trace)
+        elif re.match(r"^\$\(", trace):
+            raise SystemExit("trace placeholder needs --trace-dir, TRACE_DIR, or HERMES_TRACE")
+        filename = Path(trace).name
+        workload = filename.split(".champsim", 1)[0]
+        command = [str(binary), "-warmup_instructions", str(args.warmup_instructions),
+                   "-simulation_instructions", str(args.simulation_instructions),
+                   "-traces", trace]
+        print(" ".join(map(shlex.quote, command)) + " > " +
+              shlex.quote(str(output / (workload + ".log"))) + " 2>&1")
 
-# Loop through and generate execution commands with output redirection
-for trace_path in traces:
-    # Extract filename from the expanded path (e.g., /mnt/usb-.../arizona_0002.champsim-042.gz -> arizona_0002.champsim-042.gz)
-    filename = os.path.basename(trace_path)
-    
-    # Extract workload name (e.g., arizona_0002.champsim-042.gz -> arizona_0002)
-    workload_name = filename.split(".champsim")[0]
-    
-    command = (
-        f"{EXEC_PATH} -warmup_instructions {WARMUP} "
-        f"-simulation_instructions {SIM} -traces {trace_path} "
-        f"> {BIN_NAME}/{workload_name}.log 2>&1"
-    )
-    print(command)
+
+if __name__ == "__main__":
+    main()

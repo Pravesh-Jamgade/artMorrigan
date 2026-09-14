@@ -90,7 +90,10 @@ void write_csv_stats()
 		write_csv_scalar(csv, prefix + "STLB_block_hits", ooo_cpu[cpu].STLB.stlb_block_hits);
 		write_csv_scalar(csv, prefix + "STLB_block_misses", ooo_cpu[cpu].STLB.stlb_block_misses);
 		write_csv_scalar(csv, prefix + "STLB_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
-		write_csv_vector(csv, prefix + "STLB_block_footprint", vector<string>{"1", "2", "3", "4"},
+		vector<string> stlb_footprint_labels;
+		for (uint32_t ptes = 1; ptes <= STLB_PTES_PER_BLOCK; ++ptes)
+			stlb_footprint_labels.push_back(to_string(ptes));
+		write_csv_vector(csv, prefix + "STLB_block_footprint", stlb_footprint_labels,
 			ooo_cpu[cpu].STLB.stlb_block_footprint);
 
 		const char *page_levels[] = {"levelPML4_hits", "levelPDP_hits", "levelPD_hits", "levelPT_hits"};
@@ -194,8 +197,8 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 		cout << "STLB BLOCK " << (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "ANALYSIS" : "DETAIL")
 		     << " HITS: " << cache->stlb_block_hits << " MISSES: " << cache->stlb_block_misses << endl;
 		cout << "SHADOW STLB BLOCK EVICTIONS: " << cache->stlb_block_evictions << endl;
-		cout << "SHADOW STLB BLOCK FOOTPRINT (PTEs 1..4):";
-		for (int footprint = 0; footprint < 4; ++footprint)
+		cout << "SHADOW STLB BLOCK FOOTPRINT (PTEs 1.." << STLB_PTES_PER_BLOCK << "):";
+		for (int footprint = 0; footprint < STLB_PTES_PER_BLOCK; ++footprint)
 			cout << ' ' << cache->stlb_block_footprint[footprint];
 		cout << endl;
 	}
@@ -358,7 +361,7 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->stlb_block_hits = 0;
 		cache->stlb_block_misses = 0;
 		cache->stlb_block_evictions = 0;
-		for (int footprint = 0; footprint < 4; ++footprint)
+		for (int footprint = 0; footprint < STLB_PTES_PER_BLOCK; ++footprint)
 			cache->stlb_block_footprint[footprint] = 0;
 		for (uint32_t set = 0; set < cache->NUM_SET; ++set)
 			for (uint32_t way = 0; way < cache->NUM_WAY; ++way)

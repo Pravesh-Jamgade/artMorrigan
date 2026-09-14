@@ -1514,8 +1514,8 @@ void CACHE::handle_fill()
 
 	bool CACHE::stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru)
 	{
-		const uint64_t block_vpn = vpn >> 2;
-		const uint32_t offset = vpn & 3;
+		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
+		const uint32_t offset = vpn % STLB_PTES_PER_BLOCK;
 		const uint32_t set = get_set(block_vpn);
 		for (uint32_t way = 0; way < NUM_WAY; ++way) {
 			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
@@ -1535,7 +1535,7 @@ void CACHE::handle_fill()
 
 	void CACHE::stlb_block_fill(uint32_t owner_cpu, uint64_t vpn)
 	{
-		const uint64_t block_vpn = vpn >> 2;
+		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
 		const uint32_t set = get_set(block_vpn);
 		uint32_t way = NUM_WAY;
 		for (uint32_t candidate = 0; candidate < NUM_WAY; ++candidate) {
@@ -1555,14 +1555,14 @@ void CACHE::handle_fill()
 		entry.valid_mask = 0;
 		if (replacing)
 			entry.accessed_mask = 0;
-		for (uint32_t offset = 0; offset < 4; ++offset) {
+		for (uint32_t offset = 0; offset < STLB_PTES_PER_BLOCK; ++offset) {
 			uint64_t ppn;
-			if (lookup_allocated_pte(owner_cpu, (block_vpn << 2) | offset, &ppn)) {
+			if (lookup_allocated_pte(owner_cpu, block_vpn * STLB_PTES_PER_BLOCK + offset, &ppn)) {
 				entry.pte[offset] = ppn;
 				entry.valid_mask |= 1u << offset;
 			}
 		}
-		entry.accessed_mask |= 1u << (vpn & 3);
+		entry.accessed_mask |= 1u << (vpn % STLB_PTES_PER_BLOCK);
 		for (uint32_t other = 0; other < NUM_WAY; ++other)
 			if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
 		entry.lru = 0;
@@ -1570,8 +1570,8 @@ void CACHE::handle_fill()
 
 	void CACHE::stlb_block_invalidate(uint64_t vpn)
 	{
-		const uint64_t block_vpn = vpn >> 2;
-		const uint32_t offset = vpn & 3;
+		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
+		const uint32_t offset = vpn % STLB_PTES_PER_BLOCK;
 		const uint32_t set = get_set(block_vpn);
 		for (uint32_t way = 0; way < NUM_WAY; ++way) {
 			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];

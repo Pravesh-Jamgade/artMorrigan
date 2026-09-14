@@ -27,6 +27,7 @@ LEGACY_OPTIONS = {
     "--stlb_assoc": "simulator.stlb_assoc", "-stlba": "simulator.stlb_assoc",
     "--stlb_lat": "simulator.stlb_latency", "-stlblat": "simulator.stlb_latency",
     "--stlb_mode": "simulator.stlb_mode",
+    "--stlb_ptes": "simulator.stlb_ptes_per_block",
     "--ptw_start_level": "simulator.ptw_start_level",
     "--asap": "simulator.asap", "-asap": "simulator.asap",
     "--ideal": "simulator.ideal", "-ideal": "simulator.ideal",
@@ -138,6 +139,11 @@ def configure(c: configparser.ConfigParser) -> list[str]:
     if stlb_mode not in stlb_modes:
         raise ValueError("simulator.stlb_mode must be analysis or detail")
     replace_define("inc/cache.h", "DEFAULT_STLB_BLOCK_MODE", stlb_modes[stlb_mode])
+
+    stlb_ptes = get("simulator", "stlb_ptes_per_block")
+    if stlb_ptes not in {"1", "2", "4", "8"}:
+        raise ValueError("simulator.stlb_ptes_per_block must be 1, 2, 4, or 8")
+    replace_define("inc/cache.h", "STLB_PTES_PER_BLOCK", stlb_ptes)
 
     ptw_start_levels = {"l1": "1", "l2": "2"}
     ptw_start_level = get("simulator", "ptw_start_level").lower()

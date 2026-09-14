@@ -284,3 +284,36 @@ Compile-time, in the `[tage]` section of `configs/default.ini`:
 `TAGE_ALLOC_POLICY 0` at v2 capacity is the clean removal separating "bigger tables" from "better allocation".
 
 ---
+
+## Detail-mode STLB configuration matrix
+
+The `configs/stlb_detail/` presets cover the complete 12/24/36/48 KB study
+matrix with 1, 2, 4, and 8 PTEs per STLB block. They use 16-way associativity,
+the requested set counts, and `stlb_mode = detail`. Build all 16 distinct
+binaries (or one capacity row) with:
+
+```bash
+bash build_stlb_matrix.sh all
+bash build_stlb_matrix.sh 24kb
+```
+
+Each binary name includes its capacity and PTE grouping, such as
+`no64nofp_detail_24kb_4pte-...`, so configurations coexist in `ChampSim-SC/bin`.
+The 48 KB label follows the supplied matrix literally (768 one-PTE sets and
+12,288 entries with 16 ways).
+
+A benchmark `.tlist` containing `TRACE=...` records can also be expanded into
+one runnable job list for all binaries as they are built:
+
+```bash
+TRACE_DIR=/path/to/traces bash build_stlb_matrix.sh all --jobs graph.tlist matrix_jobs.list
+```
+
+For one already-generated binary, invoke the job generator directly. It accepts
+`$(HERMES_TRACE)` and other `$(..._TRACE)` placeholders and shell-quotes paths:
+
+```bash
+python3 jobs_gen.py graph.tlist ChampSim-SC/bin/no64nofp_detail_12kb_1pte-... \
+  50000000 100000000 --trace-dir /path/to/traces --output-dir logs/12kb_1pte \
+  > jobs.list
+```
