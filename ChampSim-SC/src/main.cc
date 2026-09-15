@@ -803,7 +803,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 		if(!asap && ideal!=1){
 			if(mmu_hit[0] == 0){
 				PACKET search_packet;
-				search_packet.address = pml42s >> LOG2_BLOCK_SIZE;
+				search_packet.address = pml42s;
+				search_packet.full_addr = pml42s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pml42s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
@@ -833,8 +834,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
 						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
 
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
+						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pml42s;
+						ooo_cpu[cpu].L1D.block[set][way_fill].address = pml42s;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pml42s;
 						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pml42s, 0, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
@@ -869,8 +870,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
 							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
 
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pml42s;
+							ooo_cpu[cpu].L2C.block[set][way_fill].address = pml42s;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pml42s;
 							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pml42s, 0, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
@@ -904,8 +905,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].prefetch = 0;
 								uncore.LLC.block[set][way_fill].used = 0;
 
-								uncore.LLC.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
+								uncore.LLC.block[set][way_fill].tag = pml42s;
+								uncore.LLC.block[set][way_fill].address = pml42s;
 								uncore.LLC.block[set][way_fill].full_addr = pml42s;
 								uncore.LLC.mark_translation_access(set, way_fill, pml42s, 0, false);
 								uncore.LLC.block[set][way_fill].data = 55;
@@ -922,7 +923,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 
 			if(mmu_hit[1] == 0){
 				PACKET search_packet;
-				search_packet.address = pdp2s >> LOG2_BLOCK_SIZE;
+				search_packet.address = pdp2s;
+				search_packet.full_addr = pdp2s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pdp2s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
@@ -952,8 +954,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
 						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
 
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
+						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pdp2s;
+						ooo_cpu[cpu].L1D.block[set][way_fill].address = pdp2s;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pdp2s;
 						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pdp2s, 1, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
@@ -987,8 +989,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
 							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
 
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pdp2s;
+							ooo_cpu[cpu].L2C.block[set][way_fill].address = pdp2s;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pdp2s;
 							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pdp2s, 1, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
@@ -1022,8 +1024,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].prefetch = 0;
 								uncore.LLC.block[set][way_fill].used = 0;
 
-								uncore.LLC.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
+								uncore.LLC.block[set][way_fill].tag = pdp2s;
+								uncore.LLC.block[set][way_fill].address = pdp2s;
 								uncore.LLC.block[set][way_fill].full_addr = pdp2s;
 								uncore.LLC.mark_translation_access(set, way_fill, pdp2s, 1, false);
 								uncore.LLC.block[set][way_fill].data = 55;
@@ -1040,7 +1042,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 			if((mmu_hit[2] == 0) && (LOG2_PAGE_SIZE == 12)){
 
 				PACKET search_packet;
-				search_packet.address = pd2s >> LOG2_BLOCK_SIZE;
+				search_packet.address = pd2s;
+				search_packet.full_addr = pd2s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pd2s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
@@ -1070,8 +1073,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
 						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
 
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
+						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pd2s;
+						ooo_cpu[cpu].L1D.block[set][way_fill].address = pd2s;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pd2s;
 						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pd2s, 2, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
@@ -1105,8 +1108,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
 							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
 
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pd2s;
+							ooo_cpu[cpu].L2C.block[set][way_fill].address = pd2s;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pd2s;
 							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pd2s, 2, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
@@ -1140,8 +1143,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].prefetch = 0;
 								uncore.LLC.block[set][way_fill].used = 0;
 
-								uncore.LLC.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
+								uncore.LLC.block[set][way_fill].tag = pd2s;
+								uncore.LLC.block[set][way_fill].address = pd2s;
 								uncore.LLC.block[set][way_fill].full_addr = pd2s;
 								uncore.LLC.mark_translation_access(set, way_fill, pd2s, 2, false);
 								uncore.LLC.block[set][way_fill].data = 55;
@@ -1163,7 +1166,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 				cout << "PT MISS" << endl;
 
 			PACKET search_packet;
-			search_packet.address = pt2s >> LOG2_BLOCK_SIZE;
+			search_packet.address = pt2s;
+			search_packet.full_addr = pt2s;
 
 			set = ooo_cpu[cpu].L1D.get_set(pt2s >> LOG2_BLOCK_SIZE);
 			way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
@@ -1193,8 +1197,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
 					ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
 
-					ooo_cpu[cpu].L1D.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
-					ooo_cpu[cpu].L1D.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
+					ooo_cpu[cpu].L1D.block[set][way_fill].tag = pt2s;
+					ooo_cpu[cpu].L1D.block[set][way_fill].address = pt2s;
 					ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pt2s;
 					ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pt2s, 3, false);
 					ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
@@ -1228,8 +1232,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
 						ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
 
-						ooo_cpu[cpu].L2C.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L2C.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
+						ooo_cpu[cpu].L2C.block[set][way_fill].tag = pt2s;
+						ooo_cpu[cpu].L2C.block[set][way_fill].address = pt2s;
 						ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pt2s;
 						ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pt2s, 3, false);
 						ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
@@ -1263,8 +1267,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							uncore.LLC.block[set][way_fill].prefetch = 0;
 							uncore.LLC.block[set][way_fill].used = 0;
 
-							uncore.LLC.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
-							uncore.LLC.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
+							uncore.LLC.block[set][way_fill].tag = pt2s;
+							uncore.LLC.block[set][way_fill].address = pt2s;
 							uncore.LLC.block[set][way_fill].full_addr = pt2s;
 							uncore.LLC.mark_translation_access(set, way_fill, pt2s, 3, false);
 							uncore.LLC.block[set][way_fill].data = 55;
@@ -1422,7 +1426,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 		if(!asap){
 			if(mmu_hit[0] == 0){
 				PACKET search_packet;
-				search_packet.address = pml42s >> LOG2_BLOCK_SIZE;
+				search_packet.address = pml42s;
+				search_packet.full_addr = pml42s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pml42s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
@@ -1464,7 +1469,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 
 			if(mmu_hit[1] == 0){
 				PACKET search_packet;
-				search_packet.address = pdp2s >> LOG2_BLOCK_SIZE;
+				search_packet.address = pdp2s;
+				search_packet.full_addr = pdp2s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pdp2s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
@@ -1505,7 +1511,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 
 			if((mmu_hit[2] == 0) && (LOG2_PAGE_SIZE==12)){
 				PACKET search_packet;
-				search_packet.address = pd2s >> LOG2_BLOCK_SIZE;
+				search_packet.address = pd2s;
+				search_packet.full_addr = pd2s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pd2s >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
@@ -1547,7 +1554,8 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 		}
 		if(0 == 0){
 			PACKET search_packet;
-			search_packet.address = pt2s >> LOG2_BLOCK_SIZE;
+			search_packet.address = pt2s;
+			search_packet.full_addr = pt2s;
 
 			set = ooo_cpu[cpu].L1D.get_set(pt2s >> LOG2_BLOCK_SIZE);
 			way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;

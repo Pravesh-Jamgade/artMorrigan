@@ -1696,7 +1696,8 @@ void CACHE::handle_fill()
 			stlb_block_misses++;
 			return -1;
 		}
-		uint32_t set = get_set(packet->address);
+		uint64_t cl_addr = packet->full_addr ? (packet->full_addr >> LOG2_BLOCK_SIZE) : packet->address;
+		uint32_t set = get_set(cl_addr);
 		int match_way = -1;
 
 		if (NUM_SET < set) {
