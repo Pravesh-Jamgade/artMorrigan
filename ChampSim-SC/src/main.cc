@@ -3,6 +3,7 @@
 #include <getopt.h>
 #include "ooo_cpu.h"
 #include "uncore.h"
+#include "config_params.h"
 #include <fstream>
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -11,7 +12,8 @@ uint8_t warmup_complete[NUM_CPUS],
 	all_simulation_complete = 0,
 	MAX_INSTR_DESTINATIONS = NUM_INSTR_DESTINATIONS,
 	knob_cloudsuite = 0,
-	knob_low_bandwidth = 0;
+	knob_low_bandwidth = 0,
+	knob_flush_on_end = FLUSH_ON_END;
 
 uint64_t warmup_instructions     = 1000000,
 	 simulation_instructions = 10000000,
@@ -46,7 +48,6 @@ void write_csv_stats()
 	const vector<string> cache_labels{"1", "2", "3", "4", "5", "6", "7", "8"};
 	const vector<string> footprint_names{"load", "rfo", "prefetch", "translation"};
 	const vector<string> rrc_labels{"1", "2", "4", "8", "16", "32"};
-	csv << "cache,cpu,accesses,hits,misses,MPKI,miss_rate\n";
 	for (uint32_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
 		const string prefix = "Core_" + to_string(cpu) + '_';
 		const double instructions = ooo_cpu[cpu].finish_sim_instr;
@@ -73,6 +74,8 @@ void write_csv_stats()
 				hits += level->roi_hit[cpu][type];
 				misses += level->roi_miss[cpu][type];
 			}
+
+			csv << "cache,cpu,accesses,hits,misses,MPKI,miss_rate\n";
 			csv << level->NAME << ',' << cpu << ',' << accesses << ',' << hits << ',' << misses << ','
 				<< (instructions == 0 ? 0.0 : 1000.0 * misses / instructions) << ','
 				<< (accesses == 0 ? 0.0 : 100.0 * misses / accesses) << '\n';
@@ -87,14 +90,28 @@ void write_csv_stats()
 				write_csv_scalar(csv, key + "_footprint_evictions", level->footprint_evictions[type]);
 				write_csv_vector(csv, key + "_footprint", cache_labels, level->footprint[type]);
 			}
-		write_csv_scalar(csv, prefix + "STLB_block_hits", ooo_cpu[cpu].STLB.stlb_block_hits);
-		write_csv_scalar(csv, prefix + "STLB_block_misses", ooo_cpu[cpu].STLB.stlb_block_misses);
+		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_DETAIL ? "_detail" : "_default");
+		write_csv_scalar(csv, prefix + "STLB_hits" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_hits);
+		write_csv_scalar(csv, prefix + "STLB_misses" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_misses);
 		write_csv_scalar(csv, prefix + "STLB_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
 		vector<string> stlb_footprint_labels;
 		for (uint32_t ptes = 1; ptes <= STLB_PTES_PER_BLOCK; ++ptes)
 			stlb_footprint_labels.push_back(to_string(ptes));
 		write_csv_vector(csv, prefix + "STLB_block_footprint", stlb_footprint_labels,
 			ooo_cpu[cpu].STLB.stlb_block_footprint);
+		vector<string> stlb_valid_labels;
+		for (uint32_t valid = 0; valid <= STLB_PTES_PER_BLOCK; ++valid)
+			stlb_valid_labels.push_back(to_string(valid));
+		write_csv_vector(csv, prefix + "STLB_valid_entries_on_eviction", stlb_valid_labels,
+			ooo_cpu[cpu].STLB.stlb_valid_entries_on_eviction);
+
+		csv << "STLB_VALID_FOOTPRINT_MATRIX," << cpu << "\nvalid,fp0,fp1,fp2,fp3,fp4\n";
+		for (uint32_t v = 0; v <= STLB_PTES_PER_BLOCK; ++v) {
+			csv << v;
+			for (uint32_t fp = 0; fp <= STLB_PTES_PER_BLOCK; ++fp)
+				csv << ',' << ooo_cpu[cpu].STLB.stlb_valid_footprint_matrix[v][fp];
+			csv << '\n';
+		}
 
 		const char *page_levels[] = {"levelPML4_hits", "levelPDP_hits", "levelPD_hits", "levelPT_hits"};
 		for (uint32_t page_level = 0; page_level < 4; ++page_level) {
@@ -103,6 +120,21 @@ void write_csv_stats()
 			csv << "PTW," << cpu << ',' << page_levels[page_level] << ','
 				<< ooo_cpu[cpu].STLB.pagetable_pwc_hits[page_level] << ',' << hits[0]
 				<< ",0," << hits[1] << ',' << hits[2] << ',' << hits[3] << '\n';
+		}
+
+		write_csv_vector(csv, "L2C_translation_rrc", rrc_labels, ooo_cpu[cpu].L2C.rrc);
+		vector<string> pte_valid_labels;
+		for (uint32_t valid = 0; valid <= 8; ++valid)
+			pte_valid_labels.push_back(to_string(valid));
+		write_csv_vector(csv, prefix + "L2C_translation_valid_entries_on_eviction", pte_valid_labels,
+			ooo_cpu[cpu].L2C.translation_valid_entries_on_eviction);
+
+		csv << "L2C_VALID_FOOTPRINT_MATRIX," << cpu << "\nvalid,fp0,fp1,fp2,fp3,fp4,fp5,fp6,fp7,fp8\n";
+		for (uint32_t v = 0; v <= 8; ++v) {
+			csv << v;
+			for (uint32_t fp = 0; fp <= 8; ++fp)
+				csv << ',' << ooo_cpu[cpu].L2C.translation_valid_footprint_matrix[v][fp];
+			csv << '\n';
 		}
 
 		CACHE *translation_levels[] = {&ooo_cpu[cpu].L2C};
@@ -117,12 +149,28 @@ void write_csv_stats()
 			}
 		}
 	}
+
 	for (uint32_t type = 0; type < 4; ++type) {
 		const string key = "LLC_" + footprint_names[type];
 		write_csv_scalar(csv, key + "_footprint_evictions", uncore.LLC.footprint_evictions[type]);
 		write_csv_vector(csv, key + "_footprint", cache_labels, uncore.LLC.footprint[type]);
 	}
-	write_csv_vector(csv, "LLC_rrc", rrc_labels, uncore.LLC.rrc);
+
+	write_csv_vector(csv, "LLC_translation_rrc", rrc_labels, uncore.LLC.rrc);
+	vector<string> pte_valid_labels;
+	for (uint32_t valid = 0; valid <= 8; ++valid)
+		pte_valid_labels.push_back(to_string(valid));
+	write_csv_vector(csv, "LLC_translation_valid_entries_on_eviction", pte_valid_labels,
+		uncore.LLC.translation_valid_entries_on_eviction);
+
+	csv << "LLC_VALID_FOOTPRINT_MATRIX\nvalid,fp0,fp1,fp2,fp3,fp4,fp5,fp6,fp7,fp8\n";
+	for (uint32_t v = 0; v <= 8; ++v) {
+		csv << v;
+		for (uint32_t fp = 0; fp <= 8; ++fp)
+			csv << ',' << uncore.LLC.translation_valid_footprint_matrix[v][fp];
+		csv << '\n';
+	}
+	
 	{
 		csv << "RRC_FOOTPRINT," << uncore.LLC.NAME << ",ptw_level,pt\n";
 		csv << "rrc,1,2,3,4,5,6,7,8\n";
@@ -194,13 +242,24 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 	cout << cache->NAME;
 	cout << " AVERAGE MISS LATENCY: " << (1.0*(cache->total_miss_latency))/TOTAL_MISS << " cycles" << endl;
 	if (cache->NAME == "STLB") {
-		cout << "STLB BLOCK " << (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "ANALYSIS" : "DETAIL")
-		     << " HITS: " << cache->stlb_block_hits << " MISSES: " << cache->stlb_block_misses << endl;
+		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : "default");
+		cout << "STLB HITS_" << stlb_suffix << ": " << cache->stlb_block_hits << " MISSES_" << stlb_suffix << ": " << cache->stlb_block_misses << endl;
 		cout << "SHADOW STLB BLOCK EVICTIONS: " << cache->stlb_block_evictions << endl;
 		cout << "SHADOW STLB BLOCK FOOTPRINT (PTEs 1.." << STLB_PTES_PER_BLOCK << "):";
 		for (int footprint = 0; footprint < STLB_PTES_PER_BLOCK; ++footprint)
 			cout << ' ' << cache->stlb_block_footprint[footprint];
 		cout << endl;
+		cout << "SHADOW STLB BLOCK VALID ENTRIES ON EVICTION (0.." << STLB_PTES_PER_BLOCK << "):";
+		for (int valid = 0; valid <= STLB_PTES_PER_BLOCK; ++valid)
+			cout << ' ' << cache->stlb_valid_entries_on_eviction[valid];
+		cout << endl;
+		cout << "SHADOW STLB BLOCK VALID x FOOTPRINT MATRIX (rows=valid 0.." << STLB_PTES_PER_BLOCK << ", cols=footprint 0.." << STLB_PTES_PER_BLOCK << "):" << endl;
+		for (int valid = 0; valid <= STLB_PTES_PER_BLOCK; ++valid) {
+			cout << "  valid " << valid << ":";
+			for (int fp = 0; fp <= STLB_PTES_PER_BLOCK; ++fp)
+				cout << ' ' << cache->stlb_valid_footprint_matrix[valid][fp];
+			cout << endl;
+		}
 	}
 	if (cache->cache_type == IS_L1D || cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
 		cout << cache->NAME << " PT PTE BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;
@@ -208,6 +267,17 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 		for (int footprint = 0; footprint < 8; ++footprint)
 			cout << ' ' << cache->footprint[3][footprint];
 		cout << endl;
+		cout << cache->NAME << " PT PTE BLOCK VALID ENTRIES ON EVICTION (8-byte entries 0..8):";
+		for (int valid = 0; valid <= 8; ++valid)
+			cout << ' ' << cache->translation_valid_entries_on_eviction[valid];
+		cout << endl;
+		cout << cache->NAME << " PT PTE BLOCK VALID x FOOTPRINT MATRIX (rows=valid 0..8, cols=footprint 0..8):" << endl;
+		for (int valid = 0; valid <= 8; ++valid) {
+			cout << "  valid " << valid << ":";
+			for (int fp = 0; fp <= 8; ++fp)
+				cout << ' ' << cache->translation_valid_footprint_matrix[valid][fp];
+			cout << endl;
+		}
 	}
 	//cout << " AVERAGE MISS LATENCY: " << (cache->total_miss_latency)/TOTAL_MISS << " cycles " << cache->total_miss_latency << "/" << TOTAL_MISS<< endl;
 }
@@ -300,6 +370,10 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		for (int entry_count = 0; entry_count < 8; ++entry_count)
 			cache->footprint[type][entry_count] = 0;
 	}
+	for (int i = 0; i < 9; ++i) {
+		cache->translation_valid_entries_on_eviction[i] = 0;
+		for (int j = 0; j < 9; ++j) cache->translation_valid_footprint_matrix[i][j] = 0;
+	}
 	for (int bucket = 0; bucket < 6; ++bucket) {
 		cache->rrc[bucket] = 0;
 		for (int footprint = 0; footprint < 8; ++footprint)
@@ -363,6 +437,10 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->stlb_block_evictions = 0;
 		for (int footprint = 0; footprint < STLB_PTES_PER_BLOCK; ++footprint)
 			cache->stlb_block_footprint[footprint] = 0;
+		for (int i = 0; i <= STLB_PTES_PER_BLOCK; ++i) {
+			cache->stlb_valid_entries_on_eviction[i] = 0;
+			for (int j = 0; j <= STLB_PTES_PER_BLOCK; ++j) cache->stlb_valid_footprint_matrix[i][j] = 0;
+		}
 		for (uint32_t set = 0; set < cache->NUM_SET; ++set)
 			for (uint32_t way = 0; way < cache->NUM_WAY; ++way)
 				cache->stlb_block[set][way].accessed_mask = 0;
@@ -618,7 +696,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 			ooo_cpu[cpu].DTLB.invalidate_entry(NRU_vpage);
 			ooo_cpu[cpu].STLB.invalidate_entry(NRU_vpage);
 			for (uint32_t i=0; i<BLOCK_SIZE; i++) {
-				uint64_t cl_addr = (mapped_ppage << 6) | i;
+				uint64_t cl_addr = (mapped_ppage << LOG2_BLOCK_SIZE) | i;
 				ooo_cpu[cpu].L1I.invalidate_entry(cl_addr);
 				ooo_cpu[cpu].L1D.invalidate_entry(cl_addr);
 				ooo_cpu[cpu].L2C.invalidate_entry(cl_addr);
@@ -803,7 +881,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 		if(!asap && ideal!=1){
 			if(mmu_hit[0] == 0){
 				PACKET search_packet;
-				search_packet.address = pml42s;
+				search_packet.address = pml42s >> LOG2_BLOCK_SIZE;
 				search_packet.full_addr = pml42s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pml42s >> LOG2_BLOCK_SIZE);
@@ -834,8 +912,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
 						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
 
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pml42s;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pml42s;
+						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
+						ooo_cpu[cpu].L1D.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pml42s;
 						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pml42s, 0, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
@@ -870,8 +948,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
 							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
 
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pml42s;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pml42s;
+							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L2C.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pml42s;
 							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pml42s, 0, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
@@ -905,8 +983,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].prefetch = 0;
 								uncore.LLC.block[set][way_fill].used = 0;
 
-								uncore.LLC.block[set][way_fill].tag = pml42s;
-								uncore.LLC.block[set][way_fill].address = pml42s;
+								uncore.LLC.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
+								uncore.LLC.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pml42s;
 								uncore.LLC.mark_translation_access(set, way_fill, pml42s, 0, false);
 								uncore.LLC.block[set][way_fill].data = 55;
@@ -923,7 +1001,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 
 			if(mmu_hit[1] == 0){
 				PACKET search_packet;
-				search_packet.address = pdp2s;
+				search_packet.address = pdp2s >> LOG2_BLOCK_SIZE;
 				search_packet.full_addr = pdp2s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pdp2s >> LOG2_BLOCK_SIZE);
@@ -954,8 +1032,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
 						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
 
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pdp2s;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pdp2s;
+						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
+						ooo_cpu[cpu].L1D.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pdp2s;
 						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pdp2s, 1, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
@@ -989,8 +1067,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
 							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
 
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pdp2s;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pdp2s;
+							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L2C.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pdp2s;
 							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pdp2s, 1, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
@@ -1024,8 +1102,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].prefetch = 0;
 								uncore.LLC.block[set][way_fill].used = 0;
 
-								uncore.LLC.block[set][way_fill].tag = pdp2s;
-								uncore.LLC.block[set][way_fill].address = pdp2s;
+								uncore.LLC.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
+								uncore.LLC.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pdp2s;
 								uncore.LLC.mark_translation_access(set, way_fill, pdp2s, 1, false);
 								uncore.LLC.block[set][way_fill].data = 55;
@@ -1042,7 +1120,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 			if((mmu_hit[2] == 0) && (LOG2_PAGE_SIZE == 12)){
 
 				PACKET search_packet;
-				search_packet.address = pd2s;
+				search_packet.address = pd2s >> LOG2_BLOCK_SIZE;
 				search_packet.full_addr = pd2s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pd2s >> LOG2_BLOCK_SIZE);
@@ -1073,8 +1151,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
 						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
 
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pd2s;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pd2s;
+						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
+						ooo_cpu[cpu].L1D.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pd2s;
 						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pd2s, 2, false);
 						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
@@ -1108,8 +1186,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
 							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
 
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pd2s;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pd2s;
+							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L2C.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pd2s;
 							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pd2s, 2, false);
 							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
@@ -1143,8 +1221,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 								uncore.LLC.block[set][way_fill].prefetch = 0;
 								uncore.LLC.block[set][way_fill].used = 0;
 
-								uncore.LLC.block[set][way_fill].tag = pd2s;
-								uncore.LLC.block[set][way_fill].address = pd2s;
+								uncore.LLC.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
+								uncore.LLC.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
 								uncore.LLC.block[set][way_fill].full_addr = pd2s;
 								uncore.LLC.mark_translation_access(set, way_fill, pd2s, 2, false);
 								uncore.LLC.block[set][way_fill].data = 55;
@@ -1166,7 +1244,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 				cout << "PT MISS" << endl;
 
 			PACKET search_packet;
-			search_packet.address = pt2s;
+			search_packet.address = pt2s >> LOG2_BLOCK_SIZE;
 			search_packet.full_addr = pt2s;
 
 			set = ooo_cpu[cpu].L1D.get_set(pt2s >> LOG2_BLOCK_SIZE);
@@ -1197,8 +1275,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
 					ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
 
-					ooo_cpu[cpu].L1D.block[set][way_fill].tag = pt2s;
-					ooo_cpu[cpu].L1D.block[set][way_fill].address = pt2s;
+					ooo_cpu[cpu].L1D.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
+					ooo_cpu[cpu].L1D.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 					ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pt2s;
 					ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pt2s, 3, false);
 					ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
@@ -1232,8 +1310,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
 						ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
 
-						ooo_cpu[cpu].L2C.block[set][way_fill].tag = pt2s;
-						ooo_cpu[cpu].L2C.block[set][way_fill].address = pt2s;
+						ooo_cpu[cpu].L2C.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
+						ooo_cpu[cpu].L2C.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 						ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pt2s;
 						ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pt2s, 3, false);
 						ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
@@ -1267,8 +1345,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 							uncore.LLC.block[set][way_fill].prefetch = 0;
 							uncore.LLC.block[set][way_fill].used = 0;
 
-							uncore.LLC.block[set][way_fill].tag = pt2s;
-							uncore.LLC.block[set][way_fill].address = pt2s;
+							uncore.LLC.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
+							uncore.LLC.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
 							uncore.LLC.block[set][way_fill].full_addr = pt2s;
 							uncore.LLC.mark_translation_access(set, way_fill, pt2s, 3, false);
 							uncore.LLC.block[set][way_fill].data = 55;
@@ -1426,7 +1504,7 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 		if(!asap){
 			if(mmu_hit[0] == 0){
 				PACKET search_packet;
-				search_packet.address = pml42s;
+				search_packet.address = pml42s >> LOG2_BLOCK_SIZE;
 				search_packet.full_addr = pml42s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pml42s >> LOG2_BLOCK_SIZE);
@@ -1469,7 +1547,7 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 
 			if(mmu_hit[1] == 0){
 				PACKET search_packet;
-				search_packet.address = pdp2s;
+				search_packet.address = pdp2s >> LOG2_BLOCK_SIZE;
 				search_packet.full_addr = pdp2s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pdp2s >> LOG2_BLOCK_SIZE);
@@ -1511,7 +1589,7 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 
 			if((mmu_hit[2] == 0) && (LOG2_PAGE_SIZE==12)){
 				PACKET search_packet;
-				search_packet.address = pd2s;
+				search_packet.address = pd2s >> LOG2_BLOCK_SIZE;
 				search_packet.full_addr = pd2s;
 
 				set = ooo_cpu[cpu].L1D.get_set(pd2s >> LOG2_BLOCK_SIZE);
@@ -1554,7 +1632,7 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 		}
 		if(0 == 0){
 			PACKET search_packet;
-			search_packet.address = pt2s;
+			search_packet.address = pt2s >> LOG2_BLOCK_SIZE;
 			search_packet.full_addr = pt2s;
 
 			set = ooo_cpu[cpu].L1D.get_set(pt2s >> LOG2_BLOCK_SIZE);
@@ -1641,6 +1719,7 @@ int main(int argc, char** argv)
 			{"low_bandwidth",  no_argument, 0, 'b'},
 			{"traces",  no_argument, 0, 't'},
 			{"stlb_mode", required_argument, 0, 'S'},
+			{"flush_on_end", required_argument, 0, 'F'},
 			{0, 0, 0, 0}      
 		};
 
@@ -1684,6 +1763,9 @@ int main(int argc, char** argv)
 					return 1;
 				}
 				break;
+			case 'F':
+				knob_flush_on_end = atoi(optarg);
+				break;
 			default:
 				abort();
 		}
@@ -1692,14 +1774,52 @@ int main(int argc, char** argv)
 			break;
 	}
 
-	// consequences of knobs
-	cout << "Warmup Instructions: " << warmup_instructions << endl;
-	cout << "Simulation Instructions: " << simulation_instructions << endl;
-	//cout << "Scramble Loads: " << (knob_scramble_loads ? "ture" : "false") << endl;
-	cout << "Number of CPUs: " << NUM_CPUS << endl;
-	cout << "LLC sets: " << LLC_SET << endl;
-	cout << "LLC ways: " << LLC_WAY << endl;
-	cout << "STLB block mode: " << (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "analysis" : "detail") << endl;
+	// consequences of knobs & print all configuration key-values
+	print_config_file_params();
+	cout << "=== SIMULATION CONFIGURATION ===" << endl;
+	cout << "warmup_instructions: " << warmup_instructions << endl;
+	cout << "simulation_instructions: " << simulation_instructions << endl;
+	cout << "num_cpus: " << NUM_CPUS << endl;
+	cout << "cpu_freq: " << CPU_FREQ << " MHz" << endl;
+	cout << "dram_io_freq: " << DRAM_IO_FREQ << " MHz" << endl;
+	cout << "page_size: " << PAGE_SIZE << endl;
+	cout << "log2_page_size: " << LOG2_PAGE_SIZE << endl;
+	cout << "block_size: " << BLOCK_SIZE << endl;
+	cout << "log2_block_size: " << LOG2_BLOCK_SIZE << endl;
+	cout << "ptw_start_level: " << PTW_START_LEVEL << endl;
+	cout << "itlb_set: " << ITLB_SET << endl;
+	cout << "itlb_way: " << ITLB_WAY << endl;
+	cout << "itlb_latency: " << ITLB_LATENCY << endl;
+	cout << "dtlb_set: " << DTLB_SET << endl;
+	cout << "dtlb_way: " << DTLB_WAY << endl;
+	cout << "dtlb_latency: " << DTLB_LATENCY << endl;
+	cout << "stlb_set: " << STLB_SET << endl;
+	cout << "stlb_way: " << STLB_WAY << endl;
+	cout << "stlb_latency: " << STLB_LATENCY << endl;
+	cout << "stlb_ptes_per_block: " << STLB_PTES_PER_BLOCK << endl;
+	cout << "stlb_block_mode: " << (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : "default") << endl;
+	cout << "l1i_set: " << L1I_SET << endl;
+	cout << "l1i_way: " << L1I_WAY << endl;
+	cout << "l1i_latency: " << L1I_LATENCY << endl;
+	cout << "l1d_set: " << L1D_SET << endl;
+	cout << "l1d_way: " << L1D_WAY << endl;
+	cout << "l1d_latency: " << L1D_LATENCY << endl;
+	cout << "l2c_set: " << L2C_SET << endl;
+	cout << "l2c_way: " << L2C_WAY << endl;
+	cout << "l2c_latency: " << L2C_LATENCY << endl;
+	cout << "llc_set: " << LLC_SET << endl;
+	cout << "llc_way: " << LLC_WAY << endl;
+	cout << "llc_latency: " << LLC_LATENCY << endl;
+	cout << "dram_channels: " << DRAM_CHANNELS << endl;
+	cout << "dram_ranks: " << DRAM_RANKS << endl;
+	cout << "dram_banks: " << DRAM_BANKS << endl;
+	cout << "dram_rows: " << DRAM_ROWS << endl;
+	cout << "dram_columns: " << DRAM_COLUMNS << endl;
+	cout << "dram_channel_width: " << (8 * DRAM_CHANNEL_WIDTH) << "-bit" << endl;
+	cout << "cloudsuite: " << (uint32_t)knob_cloudsuite << endl;
+	cout << "low_bandwidth: " << (uint32_t)knob_low_bandwidth << endl;
+	cout << "flush_on_end: " << (uint32_t)knob_flush_on_end << endl;
+	cout << "================================" << endl;
 
 	if (knob_low_bandwidth)
 		DRAM_MTPS = DRAM_IO_FREQ/4;
@@ -2054,6 +2174,17 @@ int main(int argc, char** argv)
 	elapsed_second -= (elapsed_hour*3600 + elapsed_minute*60);
 
 	cout << endl << "ChampSim completed all CPUs" << endl;
+	if (knob_flush_on_end) {
+		for (uint32_t i = 0; i < NUM_CPUS; i++) {
+			ooo_cpu[i].L1D.flush_stat_counters();
+			ooo_cpu[i].L1I.flush_stat_counters();
+			ooo_cpu[i].L2C.flush_stat_counters();
+			ooo_cpu[i].ITLB.flush_stat_counters();
+			ooo_cpu[i].DTLB.flush_stat_counters();
+			ooo_cpu[i].STLB.flush_stat_counters();
+		}
+		uncore.LLC.flush_stat_counters();
+	}
 	if (NUM_CPUS > 1) {
 		cout << endl << "Total Simulation Statistics (not including warmup)" << endl;
 		for (uint32_t i=0; i<NUM_CPUS; i++) {

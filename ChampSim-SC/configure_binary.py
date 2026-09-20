@@ -29,6 +29,7 @@ LEGACY_OPTIONS = {
     "--stlb_mode": "simulator.stlb_mode",
     "--stlb_ptes": "simulator.stlb_ptes_per_block",
     "--ptw_start_level": "simulator.ptw_start_level",
+    "--flush_on_end": "simulator.flush_on_end",
     "--asap": "simulator.asap", "-asap": "simulator.asap",
     "--ideal": "simulator.ideal", "-ideal": "simulator.ideal",
     "--p2tlb": "simulator.prefetch_to_tlb", "-p2tlb": "simulator.prefetch_to_tlb",
@@ -122,7 +123,32 @@ def replace_define(relative: str, macro: str, new_value: str) -> None:
     path.write_text(updated)
 
 
-def configure(c: configparser.ConfigParser) -> list[str]:
+def generate_config_header(c: configparser.ConfigParser, config_path: Path) -> None:
+    path = ROOT / "inc" / "config_params.h"
+    if path.exists():
+        ORIGINAL_SOURCES.setdefault(path, path.read_text())
+    lines = [
+        '#ifndef CONFIG_PARAMS_H',
+        '#define CONFIG_PARAMS_H',
+        '',
+        '#include <iostream>',
+        '',
+        'inline void print_config_file_params() {',
+        '    std::cout << "=== CONFIG FILE KEY-VALUES ===" << std::endl;',
+        f'    std::cout << "config_file: {config_path.name}" << std::endl;',
+    ]
+    for section in c.sections():
+        for key, val in c.items(section):
+            lines.append(f'    std::cout << "[{section}] {key} = {val}" << std::endl;')
+    lines.append('    std::cout << "==============================" << std::endl << std::endl;')
+    lines.append('}')
+    lines.append('#endif')
+    lines.append('')
+    path.write_text('\n'.join(lines))
+
+
+def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
+    generate_config_header(c, config_path)
     get = lambda section, key: value(c, section, key)
     page_sizes = {"4kb": ("4096", "12"), "2mb": ("2097152", "21")}
     page_size = get("simulator", "page_size").lower()
@@ -157,7 +183,7 @@ def configure(c: configparser.ConfigParser) -> list[str]:
         "ENABLE_PREF_FP": "free_prefetching_prefetch", "LA_DEPTH": "lookahead_depth",
         "SUCCESSORS": "successors", "RESET_FREQ": "reset_frequency", "RP_MP": "replacement_policy",
         "LLIMIT": "lookahead_limit", "CNF_BITS": "confidence_bits",
-        "RP_SUC_MP": "successor_replacement_policy",
+        "RP_SUC_MP": "successor_replacement_policy", "FLUSH_ON_END": "flush_on_end",
     }
     for macro, key in cache_macros.items():
         replace_define("inc/cache.h", macro, get("simulator", key))
@@ -200,7 +226,7 @@ def main() -> int:
     try:
         selected, overrides = cli()
         config = load_config(selected, overrides)
-        args = configure(config)
+        args = configure(config, selected)
         print(f"Configuration: {selected.resolve()}")
         subprocess.run([str(ROOT / "build_champsim.sh"), *args], cwd=ROOT, check=True)
     except (ValueError, configparser.Error, subprocess.CalledProcessError) as error:

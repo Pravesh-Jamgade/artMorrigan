@@ -10,6 +10,7 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
 enum STLB_BLOCK_MODE { STLB_BLOCK_ANALYSIS, STLB_BLOCK_DETAIL };
 #define DEFAULT_STLB_BLOCK_MODE STLB_BLOCK_ANALYSIS
+#define FLUSH_ON_END 1
 extern STLB_BLOCK_MODE stlb_block_mode;
 bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 
@@ -151,6 +152,10 @@ class CACHE : public MEMORY {
 		STLB_BLOCK_ENTRY **stlb_block;
 		uint64_t stlb_block_hits, stlb_block_misses;
 		uint64_t stlb_block_footprint[STLB_PTES_PER_BLOCK], stlb_block_evictions;
+		uint64_t stlb_valid_entries_on_eviction[STLB_PTES_PER_BLOCK + 1];
+		uint64_t stlb_valid_footprint_matrix[STLB_PTES_PER_BLOCK + 1][STLB_PTES_PER_BLOCK + 1]; // [valid][footprint] (footprint: 0..4)
+		uint64_t translation_valid_entries_on_eviction[9];
+		uint64_t translation_valid_footprint_matrix[9][9]; // [valid][footprint] (footprint: 0..8)
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
 		// independently tracked 8-byte entries.
 		uint64_t footprint[4][8], footprint_evictions[4];
@@ -282,6 +287,14 @@ class CACHE : public MEMORY {
 				}
 				stlb_block_evictions = 0;
 				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) stlb_block_footprint[i] = 0;
+				for (int i = 0; i <= STLB_PTES_PER_BLOCK; ++i) {
+					stlb_valid_entries_on_eviction[i] = 0;
+					for (int j = 0; j <= STLB_PTES_PER_BLOCK; ++j) stlb_valid_footprint_matrix[i][j] = 0;
+				}
+				for (int i = 0; i < 9; ++i) {
+					translation_valid_entries_on_eviction[i] = 0;
+					for (int j = 0; j < 9; ++j) translation_valid_footprint_matrix[i][j] = 0;
+				}
 				for (int i = 0; i < 6; ++i) {
 					rrc[i] = 0;
 					for (int j = 0; j < 8; ++j) translation_rrc_footprint[i][j] = 0;
@@ -463,6 +476,7 @@ class CACHE : public MEMORY {
 		void mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, uint8_t ptw_level, bool rereference = true);
 		void mark_cache_access(uint32_t set, uint32_t way, uint8_t type, uint64_t byte_address, bool rereference = true);
 		void record_footprint_on_eviction(uint32_t set, uint32_t way);
+		void flush_stat_counters();
 
 		void issue_prefetches(int offset, uint64_t current_vpn, uint64_t ip, uint64_t instr_id, int iflag, int * free_indexes, uint8_t type, int answer);
 };

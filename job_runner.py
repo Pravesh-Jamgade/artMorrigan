@@ -5,8 +5,6 @@ import subprocess
 import signal
 from datetime import datetime
 
-fstatus = open("job_status.log", "w")
-
 # Ensure proper command-line arguments are provided
 if len(sys.argv) < 3:
     print(f"Usage: python {sys.argv[0]} <path_to_job_file> <num_cpus>")
@@ -14,6 +12,9 @@ if len(sys.argv) < 3:
 
 JOB_FILE = sys.argv[1]
 NUM_CPUS = int(sys.argv[2])
+LOG_FILE_PATH = "job_status.log"
+
+fstatus = open(LOG_FILE_PATH, "w")
 
 # Read jobs line by line from the provided file
 commands = []
@@ -24,12 +25,12 @@ if os.path.exists(JOB_FILE):
             if cmd and not cmd.startswith("#"):
                 commands.append(cmd)
 else:
-    fstatus.write(f"Error: Job file '{JOB_FILE}' not found.\n")
+    fstatus.write(f"Error: Job file {JOB_FILE} not found.\n")
     fstatus.close()
     sys.exit(1)
 
 if not commands:
-    fstatus.write(f"Error: No valid jobs found in '{JOB_FILE}'.\n")
+    fstatus.write(f"Error: No valid jobs found in {JOB_FILE}.\n")
     fstatus.close()
     sys.exit(1)
 
@@ -49,24 +50,32 @@ def handle_sigint(sig, frame):
 signal.signal(signal.SIGINT, handle_sigint)
 
 human_start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-fstatus.write(f"Starting execution of {len(commands)} jobs from '{JOB_FILE}' with concurrency limit: {NUM_CPUS}\n")
+fstatus.write(f"Starting execution of {len(commands)} jobs from {JOB_FILE} with concurrency limit: {NUM_CPUS}\n")
 fstatus.write(f"Start Time: {human_start_time}\n\n")
 fstatus.flush()
 
 start_time = time.time()
-
 active_processes = []
 completed_jobs = []
 cmd_iterator = iter(commands)
+no_more_jobs = False
 
 try:
     while True:
         # Fill up slots up to NUM_CPUS
-        while len(active_processes) < NUM_CPUS:
+        while len(active_processes) < NUM_CPUS and not no_more_jobs:
             try:
                 cmd = next(cmd_iterator)
+                
+                # OPTIMISATION: If it's a quick setup command like mkdir, run it synchronously 
+                # so the directory definitely exists before the next parallel line runs.
+                if cmd.startswith("mkdir"):
+                    subprocess.run(cmd, shell=True)
+                    continue  # Move immediately to the next line without consuming a CPU slot
+                
                 job_start = time.time()
                 human_job_start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
                 p = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
                 active_processes.append({
                     "process": p,
@@ -75,8 +84,12 @@ try:
                 })
                 fstatus.write(f"[START] time: {human_job_start}: {cmd}\n")
                 fstatus.flush()
+                
+                # Small safety pause after spawning an asynchronous background process
+                time.sleep(0.2)
+                
             except StopIteration:
-                break
+                no_more_jobs = True
 
         # Check status of running processes
         still_active = []
@@ -92,15 +105,12 @@ try:
                 completed_jobs.append((job["command"], status, ret, duration))
                 fstatus.write(f"[{status}] (Exit: {ret}, Time: {duration:.2f}s): {job['command']}\n")
                 fstatus.flush()
-
+        
         active_processes = still_active
 
         # Break loop when all commands have been scheduled AND all active processes have finished
-        if not active_processes:
-            try:
-                next(cmd_iterator)
-            except StopIteration:
-                break
+        if no_more_jobs and not active_processes:
+            break
 
         time.sleep(1)
 
@@ -112,11 +122,11 @@ except Exception as e:
     except Exception:
         pass
     sys.exit(1)
+
 finally:
     end_time = time.time()
     total_duration = end_time - start_time
     human_end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     fstatus.write("\n==============================\n")
     fstatus.write("All jobs finished or aborted!\n")
     fstatus.write(f"End Time: {human_end_time}\n")

@@ -1468,13 +1468,33 @@ void CACHE::handle_fill()
 			}
 		}
 		const uint32_t translation_entries = footprint_size(victim.translation_footprint);
+		if (victim.ptw_level == 3 && (cache_type == IS_L1D || cache_type == IS_L2C || cache_type == IS_LLC)) {
+			uint64_t cr3 = 0x200000;
+			uint64_t base_pt_offset = (LOG2_PAGE_SIZE == 12) ?
+				(cr3 + 512 * 8 + 512 * 512 * 8 + 512 * 512 * 512 * 8) :
+				(cr3 + 512 * 8 + 512 * 512 * 8);
+			uint64_t pte_address = victim.address << LOG2_BLOCK_SIZE;
+			if (pte_address >= base_pt_offset) {
+				uint64_t vpage = (pte_address - base_pt_offset) / 8;
+				uint64_t base_vpage = vpage & ~7ULL;
+				uint32_t owner_cpu = victim.cpu;
+				uint32_t valid_count = 0;
+				for (uint32_t i = 0; i < 8; ++i) {
+					uint64_t ppn;
+					if (lookup_allocated_pte(owner_cpu, base_vpage + i, &ppn))
+						valid_count++;
+				}
+				translation_valid_entries_on_eviction[valid_count]++;
+				translation_valid_footprint_matrix[valid_count][translation_entries]++;
+			}
+		}
 		if (victim.translation_rereference_count && translation_entries &&
 		    (cache_type == IS_L2C || cache_type == IS_LLC)) {
 			const uint32_t bucket = rrc_bucket(victim.translation_rereference_count);
 			translation_rrc_footprint[bucket][translation_entries - 1]++;
 		}
-		if (victim.rereference_count) {
-			const uint32_t bucket = rrc_bucket(victim.rereference_count);
+		if (victim.translation_rereference_count) {
+			const uint32_t bucket = rrc_bucket(victim.translation_rereference_count);
 			rrc[bucket]++;
 		}
 		victim.rereference_count = 0;
@@ -1483,6 +1503,18 @@ void CACHE::handle_fill()
 		victim.translation_rereference_count = 0;
 		for (uint32_t type = 0; type < 3; ++type)
 			victim.access_footprint[type] = 0;
+	}
+
+	void CACHE::flush_stat_counters()
+	{
+		for (uint32_t set = 0; set < NUM_SET; ++set) {
+			for (uint32_t way = 0; way < NUM_WAY; ++way) {
+				if (block[set][way].valid)
+					record_footprint_on_eviction(set, way);
+				if (stlb_block && stlb_block[set][way].valid_mask)
+					evict_stlb_block(stlb_block[set][way]);
+			}
+		}
 	}
 
 	void CACHE::mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, uint8_t ptw_level, bool rereference)
@@ -1562,6 +1594,7 @@ void CACHE::handle_fill()
 				entry.valid_mask |= 1u << offset;
 			}
 		}
+
 		entry.accessed_mask |= 1u << (vpn % STLB_PTES_PER_BLOCK);
 		for (uint32_t other = 0; other < NUM_WAY; ++other)
 			if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
@@ -1593,6 +1626,13 @@ void CACHE::handle_fill()
 			footprint += mask & 1;
 		stlb_block_footprint[footprint - 1]++;
 		stlb_block_evictions++;
+		
+		uint32_t valid_stlb_count = 0;
+		for (uint32_t vmask = entry.valid_mask; vmask; vmask >>= 1)
+			valid_stlb_count += vmask & 1;
+		stlb_valid_entries_on_eviction[valid_stlb_count]++;
+		stlb_valid_footprint_matrix[valid_stlb_count][footprint]++;
+
 		entry.accessed_mask = 0;
 	}
 
