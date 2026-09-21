@@ -3,6 +3,7 @@
 #include "block.h"
 #include <algorithm>
 #include "ooo_cpu.h"
+#include "uncore.h"
 
 #define DEBUG_STLB 0
 #define DEBUG 0
@@ -1047,6 +1048,7 @@ void CACHE::handle_fill()
 
 									RQ.entry[index].data = pa >> LOG2_PAGE_SIZE; 
 									RQ.entry[index].event_cycle = current_core_cycle[read_cpu];
+									stlb_block_fill(read_cpu, RQ.entry[index].address, RQ.entry[index].hit_where);
 									return_data(&RQ.entry[index]);
 
 									if(iflag == 1){
@@ -1546,39 +1548,293 @@ void CACHE::handle_fill()
 
 	bool CACHE::stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru)
 	{
-		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
-		const uint32_t offset = vpn % STLB_PTES_PER_BLOCK;
-		const uint32_t set = get_set(block_vpn);
-		for (uint32_t way = 0; way < NUM_WAY; ++way) {
-			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
-			if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
-				entry.accessed_mask |= 1u << offset;
-				*ppn = entry.pte[offset];
-				if (update_lru) {
-					for (uint32_t other = 0; other < NUM_WAY; ++other)
-						if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
-					entry.lru = 0;
+		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
+			const uint64_t block_vpn = vpn / 8; // 8 PTEs per 4KB PT block
+			const uint32_t offset = vpn % 8;
+			const uint32_t set = get_set(block_vpn);
+			for (uint32_t way = 0; way < NUM_WAY; ++way) {
+				STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
+				// stlb_sparsity lookup: Match block_vpn tag and search sector slots for matching entry_offset_in_block
+				if (entry.valid_mask && entry.tag == block_vpn) {
+					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
+						if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == offset) {
+							entry.accessed_mask |= 1u << s;
+							*ppn = entry.pte[s];
+							if (update_lru) {
+								for (uint32_t other = 0; other < NUM_WAY; ++other)
+									if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
+								entry.lru = 0;
+							}
+							return true;
+						}
+					}
 				}
-				return true;
+			}
+		} else {
+			const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
+			const uint32_t offset = vpn % STLB_PTES_PER_BLOCK;
+			const uint32_t set = get_set(block_vpn);
+			for (uint32_t way = 0; way < NUM_WAY; ++way) {
+				STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
+				if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
+					entry.accessed_mask |= 1u << offset;
+					*ppn = entry.pte[offset];
+					if (update_lru) {
+						for (uint32_t other = 0; other < NUM_WAY; ++other)
+							if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
+						entry.lru = 0;
+					}
+					return true;
+				}
 			}
 		}
 		return false;
 	}
 
-	void CACHE::stlb_block_fill(uint32_t owner_cpu, uint64_t vpn)
+	void CACHE::stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint8_t hit_where)
 	{
+		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
+			// stlb_sparsity fill:
+			// Instead of fetching consecutive neighbouring PTEs, fetch p sector entries (STLB_PTES_PER_BLOCK)
+			// prioritizing: 1. Requested PTE, 2. Previously accessed footprint PTEs in L2/LLC, 3. Left-over valid PTEs.
+			const uint64_t block_vpn = vpn / 8; // 8 PTEs per PT block
+			const uint32_t req_offset = vpn % 8;
+			const uint32_t set = get_set(block_vpn);
+
+			// 1. Search for existing matching block entry
+			int existing_way = -1;
+			int invalid_way = -1;
+			int lru_way = -1;
+			for (uint32_t candidate = 0; candidate < NUM_WAY; ++candidate) {
+				if (stlb_block[set][candidate].valid_mask && stlb_block[set][candidate].tag == block_vpn) {
+					existing_way = candidate;
+					break;
+				}
+				if (!stlb_block[set][candidate].valid_mask && invalid_way == -1) {
+					invalid_way = candidate;
+				}
+				if (stlb_block[set][candidate].lru == NUM_WAY - 1) {
+					lru_way = candidate;
+				}
+			}
+
+			// CASE A: Block ALREADY EXISTS in STLB (but requested PTE slot is missing)
+			if (existing_way != -1) {
+				STLB_BLOCK_ENTRY &entry = stlb_block[set][existing_way];
+
+				// Install req_offset into this existing block without replacing/resetting the block
+				uint64_t req_ppn = 0;
+				if (lookup_allocated_pte(owner_cpu, block_vpn * 8 + req_offset, &req_ppn)) {
+					int target_slot = -1;
+					// 1. First preference: an un-allocated (invalid) slot
+					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
+						if (!(entry.valid_mask & (1u << s))) {
+							target_slot = s;
+							break;
+						}
+					}
+					// 2. Second preference: replace an un-accessed slot
+					if (target_slot == -1) {
+						for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
+							if (!(entry.accessed_mask & (1u << s))) {
+								target_slot = s;
+								break;
+							}
+						}
+					}
+					// 3. Fallback: replace slot 0 if all slots are accessed
+					if (target_slot == -1) {
+						target_slot = 0;
+					}
+
+					entry.pte[target_slot] = req_ppn;
+					entry.entry_offset_in_block[target_slot] = req_offset;
+					entry.valid_mask |= (1u << target_slot);
+					entry.accessed_mask |= (1u << target_slot);
+				}
+
+				// Update LRU for existing block
+				for (uint32_t other = 0; other < NUM_WAY; ++other) {
+					if (other != (uint32_t)existing_way && stlb_block[set][other].lru < entry.lru) {
+						stlb_block[set][other].lru++;
+					}
+				}
+				entry.lru = 0;
+				return;
+			}
+
+			// CASE B: Block does NOT exist in STLB -> Select way for new entry
+			uint32_t way = NUM_WAY;
+			if (invalid_way != -1) {
+				way = invalid_way;
+			} else if (lru_way != -1) {
+				way = lru_way;
+			} else {
+				way = 0;
+			}
+
+			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
+			const bool replacing = entry.valid_mask && entry.tag != block_vpn;
+			if (replacing) {
+				evict_stlb_block(entry);
+			}
+
+			entry.tag = block_vpn;
+			entry.valid_mask = 0;
+			entry.accessed_mask = 0;
+
+			// Check L2C / LLC footprint recorded earlier for this 8-PTE PT block
+			uint64_t cr3 = 0x200000;
+			uint64_t base_pt_offset = (LOG2_PAGE_SIZE == 12) ?
+				(cr3 + 512 * 8 + 512 * 512 * 8 + 512 * 512 * 512 * 8) :
+				(cr3 + 512 * 8 + 512 * 512 * 8);
+			uint64_t base_vpage = block_vpn * 8;
+			uint64_t pte_address = base_pt_offset + base_vpage * 8;
+
+			uint8_t footprint_mask = 0;
+			// Use hit_where information to decide footprint query order:
+			// If hit_where == 3 (LLC hit) or 4 (DRAM hit / LLC fill), check LLC first since L2C entry may be newly allocated or absent,
+			// while LLC contains the accumulated footprint history. Otherwise check L2C first, then LLC.
+			if (hit_where == 3 || hit_where == 4) {
+				// Query LLC first
+				uint32_t llc_set = uncore.LLC.get_set(pte_address >> LOG2_BLOCK_SIZE);
+				for (uint32_t w = 0; w < uncore.LLC.NUM_WAY; ++w) {
+					if (uncore.LLC.block[llc_set][w].valid &&
+					    uncore.LLC.block[llc_set][w].tag == (pte_address >> LOG2_BLOCK_SIZE) &&
+					    uncore.LLC.block[llc_set][w].ptw_level == 3) {
+						footprint_mask = uncore.LLC.block[llc_set][w].translation_footprint;
+						break;
+					}
+				}
+				// Fallback to L2C if not found in LLC
+				if (!footprint_mask) {
+					uint32_t l2_set = ooo_cpu[owner_cpu].L2C.get_set(pte_address >> LOG2_BLOCK_SIZE);
+					for (uint32_t w = 0; w < ooo_cpu[owner_cpu].L2C.NUM_WAY; ++w) {
+						if (ooo_cpu[owner_cpu].L2C.block[l2_set][w].valid &&
+						    ooo_cpu[owner_cpu].L2C.block[l2_set][w].tag == (pte_address >> LOG2_BLOCK_SIZE) &&
+						    ooo_cpu[owner_cpu].L2C.block[l2_set][w].ptw_level == 3) {
+							footprint_mask = ooo_cpu[owner_cpu].L2C.block[l2_set][w].translation_footprint;
+							break;
+						}
+					}
+				}
+			} else {
+				// Query L2C first for translation_footprint
+				uint32_t l2_set = ooo_cpu[owner_cpu].L2C.get_set(pte_address >> LOG2_BLOCK_SIZE);
+				for (uint32_t w = 0; w < ooo_cpu[owner_cpu].L2C.NUM_WAY; ++w) {
+					if (ooo_cpu[owner_cpu].L2C.block[l2_set][w].valid &&
+					    ooo_cpu[owner_cpu].L2C.block[l2_set][w].tag == (pte_address >> LOG2_BLOCK_SIZE) &&
+					    ooo_cpu[owner_cpu].L2C.block[l2_set][w].ptw_level == 3) {
+						footprint_mask = ooo_cpu[owner_cpu].L2C.block[l2_set][w].translation_footprint;
+						break;
+					}
+				}
+				// If not in L2C, query LLC
+				if (!footprint_mask) {
+					uint32_t llc_set = uncore.LLC.get_set(pte_address >> LOG2_BLOCK_SIZE);
+					for (uint32_t w = 0; w < uncore.LLC.NUM_WAY; ++w) {
+						if (uncore.LLC.block[llc_set][w].valid &&
+						    uncore.LLC.block[llc_set][w].tag == (pte_address >> LOG2_BLOCK_SIZE) &&
+						    uncore.LLC.block[llc_set][w].ptw_level == 3) {
+							footprint_mask = uncore.LLC.block[llc_set][w].translation_footprint;
+							break;
+						}
+					}
+				}
+			}
+
+			// Gather valid entries (0..7) in this 8-PTE PT block
+			uint8_t valid_entries_mask = 0;
+			uint64_t page_ppns[8] = {0};
+			for (uint32_t offset = 0; offset < 8; ++offset) {
+				uint64_t ppn;
+				if (lookup_allocated_pte(owner_cpu, base_vpage + offset, &ppn)) {
+					valid_entries_mask |= 1u << offset;
+					page_ppns[offset] = ppn;
+				}
+			}
+
+			uint32_t sector_slot = 0;
+			uint8_t filled_offsets_mask = 0;
+
+			// Step 1 (stlb_sparsity): Fill requested entry if valid into sector slot
+			if (valid_entries_mask & (1u << req_offset)) {
+				entry.pte[sector_slot] = page_ppns[req_offset];
+				entry.entry_offset_in_block[sector_slot] = req_offset;
+				entry.valid_mask |= 1u << sector_slot;
+				filled_offsets_mask |= 1u << req_offset;
+				sector_slot++;
+			}
+
+			// Step 2 (stlb_sparsity): Fill footprint entries recorded earlier in L2/LLC
+			for (uint32_t offset = 0; offset < 8 && sector_slot < STLB_PTES_PER_BLOCK; ++offset) {
+				if (offset == req_offset) continue;
+				if ((footprint_mask & (1u << offset)) && (valid_entries_mask & (1u << offset))) {
+					entry.pte[sector_slot] = page_ppns[offset];
+					entry.entry_offset_in_block[sector_slot] = offset;
+					entry.valid_mask |= 1u << sector_slot;
+					filled_offsets_mask |= 1u << offset;
+					sector_slot++;
+				}
+			}
+
+			// Step 3 (stlb_sparsity): Fill remaining sector slots from left-over valid entries (in offset order 0..7)
+			for (uint32_t offset = 0; offset < 8 && sector_slot < STLB_PTES_PER_BLOCK; ++offset) {
+				if (!(filled_offsets_mask & (1u << offset)) && (valid_entries_mask & (1u << offset))) {
+					entry.pte[sector_slot] = page_ppns[offset];
+					entry.entry_offset_in_block[sector_slot] = offset;
+					entry.valid_mask |= 1u << sector_slot;
+					filled_offsets_mask |= 1u << offset;
+					sector_slot++;
+				}
+			}
+
+			// Step 4 (stlb_sparsity): Any un-filled sector slots remain invalid (valid_mask bit cleared)
+
+			// Mark accessed bit for the sector slot corresponding to requested entry
+			for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
+				if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == req_offset) {
+					entry.accessed_mask |= 1u << s;
+					break;
+				}
+			}
+
+			for (uint32_t other = 0; other < NUM_WAY; ++other)
+				if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
+			entry.lru = 0;
+			return;
+		}
+
 		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
 		const uint32_t set = get_set(block_vpn);
-		uint32_t way = NUM_WAY;
+		
+		int existing_way = -1;
+		int invalid_way = -1;
+		int lru_way = -1;
 		for (uint32_t candidate = 0; candidate < NUM_WAY; ++candidate) {
 			if (stlb_block[set][candidate].valid_mask && stlb_block[set][candidate].tag == block_vpn) {
-				way = candidate;
+				existing_way = candidate;
 				break;
 			}
-			if (!stlb_block[set][candidate].valid_mask || stlb_block[set][candidate].lru == NUM_WAY - 1)
-				way = candidate;
+			if (!stlb_block[set][candidate].valid_mask && invalid_way == -1) {
+				invalid_way = candidate;
+			}
+			if (stlb_block[set][candidate].lru == NUM_WAY - 1) {
+				lru_way = candidate;
+			}
 		}
-		if (way == NUM_WAY) way = 0;
+
+		uint32_t way = NUM_WAY;
+		if (existing_way != -1) {
+			way = existing_way;
+		} else if (invalid_way != -1) {
+			way = invalid_way;
+		} else if (lru_way != -1) {
+			way = lru_way;
+		} else {
+			way = 0;
+		}
+
 		STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
 		const bool replacing = entry.valid_mask && entry.tag != block_vpn;
 		if (replacing)
@@ -1591,6 +1847,7 @@ void CACHE::handle_fill()
 			uint64_t ppn;
 			if (lookup_allocated_pte(owner_cpu, block_vpn * STLB_PTES_PER_BLOCK + offset, &ppn)) {
 				entry.pte[offset] = ppn;
+				entry.entry_offset_in_block[offset] = offset;
 				entry.valid_mask |= 1u << offset;
 			}
 		}
@@ -1603,6 +1860,26 @@ void CACHE::handle_fill()
 
 	void CACHE::stlb_block_invalidate(uint64_t vpn)
 	{
+		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
+			const uint64_t block_vpn = vpn / 8;
+			const uint32_t offset = vpn % 8;
+			const uint32_t set = get_set(block_vpn);
+			for (uint32_t way = 0; way < NUM_WAY; ++way) {
+				STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
+				if (entry.valid_mask && entry.tag == block_vpn) {
+					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
+						if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == offset) {
+							entry.valid_mask &= ~(1u << s);
+							entry.accessed_mask &= ~(1u << s);
+						}
+					}
+					if (!entry.valid_mask)
+						evict_stlb_block(entry);
+				}
+			}
+			return;
+		}
+
 		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
 		const uint32_t offset = vpn % STLB_PTES_PER_BLOCK;
 		const uint32_t set = get_set(block_vpn);
@@ -1650,7 +1927,7 @@ void CACHE::handle_fill()
 	{
 		record_footprint_on_eviction(set, way);
 		if (cache_type == IS_STLB)
-			stlb_block_fill(packet->cpu, packet->address);
+			stlb_block_fill(packet->cpu, packet->address, packet->hit_where);
 #ifdef SANITY_CHECK
 		if (cache_type == IS_ITLB) {
 			if (packet->data == 0){
@@ -1726,12 +2003,12 @@ void CACHE::handle_fill()
 
 	int CACHE::check_hit(PACKET *packet)
 	{
-		if (cache_type == IS_STLB && stlb_block_mode == STLB_BLOCK_DETAIL) {
+		if (cache_type == IS_STLB && (stlb_block_mode == STLB_BLOCK_DETAIL || stlb_block_mode == STLB_BLOCK_SPARSITY)) {
 			uint64_t ppn = 0;
 			if (stlb_block_lookup(packet->address, &ppn)) {
 				stlb_block_hits++;
 				packet->data = ppn;
-				return 0; // The detail-mode hit path reads data from the packet.
+				return 0; // The detail/sparsity mode hit path reads data from the packet.
 			}
 			stlb_block_misses++;
 			return -1;

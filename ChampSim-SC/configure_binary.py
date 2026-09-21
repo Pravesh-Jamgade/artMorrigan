@@ -160,10 +160,11 @@ def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
     stlb_modes = {
         "analysis": "STLB_BLOCK_ANALYSIS",
         "detail": "STLB_BLOCK_DETAIL",
+        "sparsity": "STLB_BLOCK_SPARSITY",
     }
     stlb_mode = get("simulator", "stlb_mode").lower()
     if stlb_mode not in stlb_modes:
-        raise ValueError("simulator.stlb_mode must be analysis or detail")
+        raise ValueError("simulator.stlb_mode must be analysis, detail, or sparsity")
     replace_define("inc/cache.h", "DEFAULT_STLB_BLOCK_MODE", stlb_modes[stlb_mode])
 
     stlb_ptes = get("simulator", "stlb_ptes_per_block")

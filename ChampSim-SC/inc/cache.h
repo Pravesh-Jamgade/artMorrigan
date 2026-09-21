@@ -5,10 +5,13 @@
 #include <map>
 #include <iterator>
 
+class UNCORE;
+extern UNCORE uncore;
+
 // PAGE
 extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
-enum STLB_BLOCK_MODE { STLB_BLOCK_ANALYSIS, STLB_BLOCK_DETAIL };
+enum STLB_BLOCK_MODE { STLB_BLOCK_ANALYSIS, STLB_BLOCK_DETAIL, STLB_BLOCK_SPARSITY };
 #define DEFAULT_STLB_BLOCK_MODE STLB_BLOCK_ANALYSIS
 #define FLUSH_ON_END 1
 extern STLB_BLOCK_MODE stlb_block_mode;
@@ -136,12 +139,18 @@ bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 
 class CACHE : public MEMORY {
 	public:
+		// STLB block entry supporting standard (consecutive) and sparse (footprint-driven) modes
 		struct STLB_BLOCK_ENTRY {
 			uint64_t tag, pte[STLB_PTES_PER_BLOCK];
+			// stlb_sparsity: Stores the 3-bit offset (0..7 within 8-PTE PT block) for each sector slot
+			uint8_t entry_offset_in_block[STLB_PTES_PER_BLOCK];
 			uint32_t lru;
 			uint8_t valid_mask, accessed_mask;
 			STLB_BLOCK_ENTRY() : tag(0), lru(0), valid_mask(0), accessed_mask(0) {
-				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) pte[i] = 0;
+				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) {
+					pte[i] = 0;
+					entry_offset_in_block[i] = 0;
+				}
 			}
 		};
 		uint32_t cpu;
@@ -393,7 +402,7 @@ class CACHE : public MEMORY {
 		// functions
 		pair<int, int> check_hit_stlb_pq(uint64_t vpn);
 		bool stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru = true);
-		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn);
+		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint8_t hit_where = 0);
 		void stlb_block_invalidate(uint64_t vpn);
 		void evict_stlb_block(STLB_BLOCK_ENTRY &entry);
 

@@ -90,7 +90,7 @@ void write_csv_stats()
 				write_csv_scalar(csv, key + "_footprint_evictions", level->footprint_evictions[type]);
 				write_csv_vector(csv, key + "_footprint", cache_labels, level->footprint[type]);
 			}
-		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_DETAIL ? "_detail" : "_default");
+		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_SPARSITY ? "_sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "_detail" : "_default"));
 		write_csv_scalar(csv, prefix + "STLB_hits" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_hits);
 		write_csv_scalar(csv, prefix + "STLB_misses" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_misses);
 		write_csv_scalar(csv, prefix + "STLB_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
@@ -242,7 +242,7 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 	cout << cache->NAME;
 	cout << " AVERAGE MISS LATENCY: " << (1.0*(cache->total_miss_latency))/TOTAL_MISS << " cycles" << endl;
 	if (cache->NAME == "STLB") {
-		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : "default");
+		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_SPARSITY ? "sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : "default"));
 		cout << "STLB HITS_" << stlb_suffix << ": " << cache->stlb_block_hits << " MISSES_" << stlb_suffix << ": " << cache->stlb_block_misses << endl;
 		cout << "SHADOW STLB BLOCK EVICTIONS: " << cache->stlb_block_evictions << endl;
 		cout << "SHADOW STLB BLOCK FOOTPRINT (PTEs 1.." << STLB_PTES_PER_BLOCK << "):";
@@ -1251,6 +1251,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 			way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
 			if(way_read >=0){
+				search_packet.hit_where = 1; // L1D hit
 				ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pt2s, 3);
 				ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][0]++;
 				if(!magic){
@@ -1286,6 +1287,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 				set = ooo_cpu[cpu].L2C.get_set(pt2s >> LOG2_BLOCK_SIZE);
 				way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 				if(way_read >=0){
+					search_packet.hit_where = 2; // L2C hit
 					ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pt2s, 3);
 					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][1]++;
 					if(!magic){
@@ -1321,6 +1323,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 					set = uncore.LLC.get_set(pt2s >> LOG2_BLOCK_SIZE);
 					way_read = uncore.LLC.check_hit(&search_packet);
 					if(way_read >=0){
+						search_packet.hit_where = 3; // LLC hit
 						uncore.LLC.mark_translation_access(set, way_read, pt2s, 3);
 						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][2]++;
 						if(!magic){
@@ -1330,6 +1333,7 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 						cstall += LLC_LATENCY;
 					}
 					else{
+						search_packet.hit_where = 4; // DRAM hit / LLC fill
 						cstall += LLC_LATENCY;
 
 						if(!magic){

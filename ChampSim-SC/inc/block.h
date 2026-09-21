@@ -104,7 +104,8 @@ class PACKET {
 		    free_distance,
 		    lad,
 		    irip,
-		    conf;
+		    conf,
+		    hit_where; // Location where PTW hit/found translation: 0=PWC, 1=L1D, 2=L2C, 3=LLC, 4=DRAM
 
 		uint32_t pf_metadata;
 
@@ -169,6 +170,7 @@ class PACKET {
 				 free_distance = 0;
 				 lad = 0;
 				 conf = 0;
+				 hit_where = 0;
 
 #if 0
 				 for (uint32_t i=0; i<ROB_SIZE; i++) {
