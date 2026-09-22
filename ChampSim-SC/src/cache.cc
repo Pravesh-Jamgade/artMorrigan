@@ -892,6 +892,7 @@ void CACHE::handle_fill()
 						block[set][way].prefetch = 0;
 					}
 					block[set][way].used = 1;
+					block[set][way].rereference_count++;
 
 					HIT[RQ.entry[index].type]++;
 					ACCESS[RQ.entry[index].type]++;
@@ -1559,6 +1560,7 @@ void CACHE::handle_fill()
 					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
 						if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == offset) {
 							entry.accessed_mask |= 1u << s;
+							entry.rereference_count++;
 							*ppn = entry.pte[s];
 							if (update_lru) {
 								for (uint32_t other = 0; other < NUM_WAY; ++other)
@@ -1578,6 +1580,7 @@ void CACHE::handle_fill()
 				STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
 				if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
 					entry.accessed_mask |= 1u << offset;
+					entry.rereference_count++;
 					*ppn = entry.pte[offset];
 					if (update_lru) {
 						for (uint32_t other = 0; other < NUM_WAY; ++other)
@@ -1642,9 +1645,9 @@ void CACHE::handle_fill()
 							}
 						}
 					}
-					// 3. Fallback: replace slot 0 if all slots are accessed
+					// 3. Fallback: randomly pick a slot to evict if all slots are occupied and accessed
 					if (target_slot == -1) {
-						target_slot = 0;
+						target_slot = rand() % STLB_PTES_PER_BLOCK;
 					}
 
 					entry.pte[target_slot] = req_ppn;
@@ -1682,6 +1685,7 @@ void CACHE::handle_fill()
 			entry.tag = block_vpn;
 			entry.valid_mask = 0;
 			entry.accessed_mask = 0;
+			entry.rereference_count = 0;
 
 			// Check L2C / LLC footprint recorded earlier for this 8-PTE PT block
 			uint64_t cr3 = 0x200000;
@@ -1841,6 +1845,7 @@ void CACHE::handle_fill()
 			evict_stlb_block(entry);
 		entry.tag = block_vpn;
 		entry.valid_mask = 0;
+		entry.rereference_count = 0;
 		if (replacing)
 			entry.accessed_mask = 0;
 		for (uint32_t offset = 0; offset < STLB_PTES_PER_BLOCK; ++offset) {
@@ -1910,6 +1915,11 @@ void CACHE::handle_fill()
 		stlb_valid_entries_on_eviction[valid_stlb_count]++;
 		stlb_valid_footprint_matrix[valid_stlb_count][footprint]++;
 
+		if (entry.rereference_count) {
+			const uint32_t bucket = rrc_bucket(entry.rereference_count);
+			rrc[bucket]++;
+		}
+		entry.rereference_count = 0;
 		entry.accessed_mask = 0;
 	}
 

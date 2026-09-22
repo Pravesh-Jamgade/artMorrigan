@@ -133,7 +133,7 @@ When a miss occurs for a requested PTE whose parent PT block (`block_vpn`) is al
 3. Select an internal target slot `target_slot`:
    - **Preference 1**: First un-allocated (invalid) slot (`!(entry.valid_mask & (1 << s))`).
    - **Preference 2**: First un-accessed slot (`!(entry.accessed_mask & (1 << s))`).
-   - **Fallback**: Replace slot `0`.
+   - **Fallback**: Replace a random slot (`rand() % STLB_PTES_PER_BLOCK`) if all slots are occupied and accessed.
 4. Overwrite slot `target_slot`:
    - `entry.pte[target_slot] = req_ppn`
    - `entry.entry_offset_in_block[target_slot] = req_offset`

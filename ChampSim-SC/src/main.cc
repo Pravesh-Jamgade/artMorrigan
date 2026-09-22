@@ -1762,6 +1762,8 @@ int main(int argc, char** argv)
 					stlb_block_mode = STLB_BLOCK_ANALYSIS;
 				else if (strcmp(optarg, "detail") == 0)
 					stlb_block_mode = STLB_BLOCK_DETAIL;
+				else if (strcmp(optarg, "sparsity") == 0)
+					stlb_block_mode = STLB_BLOCK_SPARSITY;
 				else {
 					cerr << "Invalid --stlb_mode (expected analysis or detail): " << optarg << endl;
 					return 1;
@@ -1801,7 +1803,7 @@ int main(int argc, char** argv)
 	cout << "stlb_way: " << STLB_WAY << endl;
 	cout << "stlb_latency: " << STLB_LATENCY << endl;
 	cout << "stlb_ptes_per_block: " << STLB_PTES_PER_BLOCK << endl;
-	cout << "stlb_block_mode: " << (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : "default") << endl;
+	cout << "stlb_block_mode: " << (stlb_block_mode == STLB_BLOCK_SPARSITY ? "sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "analysis" : "default"))) << endl;
 	cout << "l1i_set: " << L1I_SET << endl;
 	cout << "l1i_way: " << L1I_WAY << endl;
 	cout << "l1i_latency: " << L1I_LATENCY << endl;

@@ -144,9 +144,9 @@ class CACHE : public MEMORY {
 			uint64_t tag, pte[STLB_PTES_PER_BLOCK];
 			// stlb_sparsity: Stores the 3-bit offset (0..7 within 8-PTE PT block) for each sector slot
 			uint8_t entry_offset_in_block[STLB_PTES_PER_BLOCK];
-			uint32_t lru;
+			uint32_t lru, rereference_count;
 			uint8_t valid_mask, accessed_mask;
-			STLB_BLOCK_ENTRY() : tag(0), lru(0), valid_mask(0), accessed_mask(0) {
+			STLB_BLOCK_ENTRY() : tag(0), lru(0), rereference_count(0), valid_mask(0), accessed_mask(0) {
 				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) {
 					pte[i] = 0;
 					entry_offset_in_block[i] = 0;
