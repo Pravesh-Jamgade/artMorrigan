@@ -819,10 +819,10 @@ void CACHE::handle_fill()
 							PROCESSED.add_queue(&RQ.entry[index]);
 					}
 					else if (cache_type == IS_STLB){
-						if (stlb_block_mode != STLB_BLOCK_DETAIL)
+						if (stlb_block_mode != STLB_BLOCK_DETAIL && stlb_block_mode != STLB_BLOCK_SPARSITY)
 							RQ.entry[index].data = block[set][way].data;
 
-						if(stlb_block_mode != STLB_BLOCK_DETAIL && current_core_cycle[read_cpu] < block[set][way].stalls)
+						if (stlb_block_mode != STLB_BLOCK_DETAIL && stlb_block_mode != STLB_BLOCK_SPARSITY && current_core_cycle[read_cpu] < block[set][way].stalls)
 							add_stall_prefetch(block[set][way].stalls-current_core_cycle[read_cpu], read_cpu);
 					}
 					else if (cache_type == IS_L1I) {
@@ -892,7 +892,6 @@ void CACHE::handle_fill()
 						block[set][way].prefetch = 0;
 					}
 					block[set][way].used = 1;
-					block[set][way].rereference_count++;
 
 					HIT[RQ.entry[index].type]++;
 					ACCESS[RQ.entry[index].type]++;
@@ -978,30 +977,33 @@ void CACHE::handle_fill()
 										answer = make_pair(-1,-1);
 									}
 
-									pair<uint64_t, uint64_t> v2p;
+									VA_TO_PA_RESULT v2p;
 									if(answer.first == -1){
 										if(iflag){
 											if(fctb_found_pos == -10){
 												v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
-												pa = v2p.first;
+												pa = v2p.pa;
+												RQ.entry[index].hit_where = v2p.hit_where;
 												int victim_entry = fctb_replacement_policy();
 												fctb[victim_entry][0] = current_vpn;
 												fctb[victim_entry][1] = (RQ.entry[index].full_addr & 0x7000)/4096;
 												fctb[victim_entry][2] = current_core_cycle[read_cpu];
-												fctb[victim_entry][3] = v2p.second;
+												fctb[victim_entry][3] = v2p.cstall;
 
 											}
 											else{
 												pa = va_to_pa_prefetch(read_cpu, RQ.entry[index].full_addr, RQ.entry[index].address);
 												if(pa == 0){
 													v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
-													pa = v2p.first;
+													pa = v2p.pa;
+													RQ.entry[index].hit_where = v2p.hit_where;
 												}
 											}
 										}
 										else{
 											v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
-											pa  = v2p.first;
+											pa  = v2p.pa;
+											RQ.entry[index].hit_where = v2p.hit_where;
 										}
 										if (iflag == 1)
 											pf_misses_pq++;
@@ -1458,6 +1460,7 @@ void CACHE::handle_fill()
 
 	void CACHE::record_footprint_on_eviction(uint32_t set, uint32_t way)
 	{
+		// executes for baseline-tlb, l1, l2, llc
 		BLOCK &victim = block[set][way];
 		if (!victim.valid)
 			return;
@@ -1470,6 +1473,8 @@ void CACHE::handle_fill()
 				footprint_evictions[type]++;
 			}
 		}
+
+		// for l1/l2/llc
 		const uint32_t translation_entries = footprint_size(victim.translation_footprint);
 		if (victim.ptw_level == 3 && (cache_type == IS_L1D || cache_type == IS_L2C || cache_type == IS_LLC)) {
 			uint64_t cr3 = 0x200000;
@@ -1491,15 +1496,25 @@ void CACHE::handle_fill()
 				translation_valid_footprint_matrix[valid_count][translation_entries]++;
 			}
 		}
+
+		// l2/llc
 		if (victim.translation_rereference_count && translation_entries &&
 		    (cache_type == IS_L2C || cache_type == IS_LLC)) {
 			const uint32_t bucket = rrc_bucket(victim.translation_rereference_count);
+			// rrc x footprint
 			translation_rrc_footprint[bucket][translation_entries - 1]++;
-		}
-		if (victim.translation_rereference_count) {
-			const uint32_t bucket = rrc_bucket(victim.translation_rereference_count);
+			// rrc
 			rrc[bucket]++;
 		}
+
+		// TLB re-reference count (recorded on entry eviction from block[set][way])
+		if (cache_type == IS_ITLB || cache_type == IS_DTLB || cache_type == IS_STLB) {
+			if (victim.rereference_count) {
+				const uint32_t bucket = rrc_bucket(victim.rereference_count);
+				rrc[bucket]++;
+			}
+		}
+		
 		victim.rereference_count = 0;
 		victim.ptw_level = UINT8_MAX;
 		victim.translation_footprint = 0;
@@ -1654,6 +1669,7 @@ void CACHE::handle_fill()
 					entry.entry_offset_in_block[target_slot] = req_offset;
 					entry.valid_mask |= (1u << target_slot);
 					entry.accessed_mask |= (1u << target_slot);
+					stlb_sparsity_offset_inserted[req_offset & 7]++;
 				}
 
 				// Update LRU for existing block
@@ -1686,6 +1702,10 @@ void CACHE::handle_fill()
 			entry.valid_mask = 0;
 			entry.accessed_mask = 0;
 			entry.rereference_count = 0;
+
+			// Record histogram for hit_where location used as filter source
+			uint8_t hit_loc = (hit_where <= 4) ? hit_where : 4;
+			stlb_sparsity_hit_where[hit_loc]++;
 
 			// Check L2C / LLC footprint recorded earlier for this 8-PTE PT block
 			uint64_t cr3 = 0x200000;
@@ -1767,6 +1787,7 @@ void CACHE::handle_fill()
 				entry.entry_offset_in_block[sector_slot] = req_offset;
 				entry.valid_mask |= 1u << sector_slot;
 				filled_offsets_mask |= 1u << req_offset;
+				stlb_sparsity_offset_inserted[req_offset & 7]++;
 				sector_slot++;
 			}
 
@@ -1778,6 +1799,7 @@ void CACHE::handle_fill()
 					entry.entry_offset_in_block[sector_slot] = offset;
 					entry.valid_mask |= 1u << sector_slot;
 					filled_offsets_mask |= 1u << offset;
+					stlb_sparsity_offset_inserted[offset & 7]++;
 					sector_slot++;
 				}
 			}
@@ -1789,6 +1811,7 @@ void CACHE::handle_fill()
 					entry.entry_offset_in_block[sector_slot] = offset;
 					entry.valid_mask |= 1u << sector_slot;
 					filled_offsets_mask |= 1u << offset;
+					stlb_sparsity_offset_inserted[offset & 7]++;
 					sector_slot++;
 				}
 			}
@@ -1915,12 +1938,13 @@ void CACHE::handle_fill()
 		stlb_valid_entries_on_eviction[valid_stlb_count]++;
 		stlb_valid_footprint_matrix[valid_stlb_count][footprint]++;
 
+		entry.accessed_mask = 0;
+
 		if (entry.rereference_count) {
 			const uint32_t bucket = rrc_bucket(entry.rereference_count);
 			rrc[bucket]++;
 		}
 		entry.rereference_count = 0;
-		entry.accessed_mask = 0;
 	}
 
 	uint32_t CACHE::get_way(uint64_t address, uint32_t set)
@@ -1938,6 +1962,7 @@ void CACHE::handle_fill()
 		record_footprint_on_eviction(set, way);
 		if (cache_type == IS_STLB)
 			stlb_block_fill(packet->cpu, packet->address, packet->hit_where);
+
 #ifdef SANITY_CHECK
 		if (cache_type == IS_ITLB) {
 			if (packet->data == 0){

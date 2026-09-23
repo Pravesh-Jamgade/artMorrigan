@@ -163,6 +163,9 @@ class CACHE : public MEMORY {
 		uint64_t stlb_block_footprint[STLB_PTES_PER_BLOCK], stlb_block_evictions;
 		uint64_t stlb_valid_entries_on_eviction[STLB_PTES_PER_BLOCK + 1];
 		uint64_t stlb_valid_footprint_matrix[STLB_PTES_PER_BLOCK + 1][STLB_PTES_PER_BLOCK + 1]; // [valid][footprint] (footprint: 0..4)
+		// Sparsity mode histograms: PTE offsets inserted (0..7) and hit_where filter source (0=PWC, 1=L1D, 2=L2C, 3=LLC, 4=DRAM)
+		uint64_t stlb_sparsity_offset_inserted[8];
+		uint64_t stlb_sparsity_hit_where[5];
 		uint64_t translation_valid_entries_on_eviction[9];
 		uint64_t translation_valid_footprint_matrix[9][9]; // [valid][footprint] (footprint: 0..8)
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
@@ -300,6 +303,8 @@ class CACHE : public MEMORY {
 					stlb_valid_entries_on_eviction[i] = 0;
 					for (int j = 0; j <= STLB_PTES_PER_BLOCK; ++j) stlb_valid_footprint_matrix[i][j] = 0;
 				}
+				for (int i = 0; i < 8; ++i) stlb_sparsity_offset_inserted[i] = 0;
+				for (int i = 0; i < 5; ++i) stlb_sparsity_hit_where[i] = 0;
 				for (int i = 0; i < 9; ++i) {
 					translation_valid_entries_on_eviction[i] = 0;
 					for (int j = 0; j < 9; ++j) translation_valid_footprint_matrix[i][j] = 0;

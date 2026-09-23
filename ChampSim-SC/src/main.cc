@@ -112,6 +112,12 @@ void write_csv_stats()
 				csv << ',' << ooo_cpu[cpu].STLB.stlb_valid_footprint_matrix[v][fp];
 			csv << '\n';
 		}
+		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
+			const vector<string> offset_labels{"off0", "off1", "off2", "off3", "off4", "off5", "off6", "off7"};
+			const vector<string> hit_where_labels{"pwc", "l1d", "l2c", "llc", "dram"};
+			write_csv_vector(csv, prefix + "STLB_sparsity_offset_inserted", offset_labels, ooo_cpu[cpu].STLB.stlb_sparsity_offset_inserted);
+			write_csv_vector(csv, prefix + "STLB_sparsity_hit_where_filter", hit_where_labels, ooo_cpu[cpu].STLB.stlb_sparsity_hit_where);
+		}
 
 		const char *page_levels[] = {"levelPML4_hits", "levelPDP_hits", "levelPD_hits", "levelPT_hits"};
 		for (uint32_t page_level = 0; page_level < 4; ++page_level) {
@@ -258,6 +264,16 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 			cout << "  valid " << valid << ":";
 			for (int fp = 0; fp <= STLB_PTES_PER_BLOCK; ++fp)
 				cout << ' ' << cache->stlb_valid_footprint_matrix[valid][fp];
+			cout << endl;
+		}
+		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
+			cout << "STLB SPARSITY OFFSET INSERTED HISTOGRAM (off0..off7):";
+			for (int off = 0; off < 8; ++off)
+				cout << ' ' << cache->stlb_sparsity_offset_inserted[off];
+			cout << endl;
+			cout << "STLB SPARSITY HIT_WHERE FILTER HISTOGRAM (0=pwc 1=l1d 2=l2c 3=llc 4=dram):";
+			for (int hw = 0; hw < 5; ++hw)
+				cout << ' ' << cache->stlb_sparsity_hit_where[hw];
 			cout << endl;
 		}
 	}
@@ -619,7 +635,7 @@ void issue_ptw_dram_read(uint32_t cpu, uint64_t address, uint64_t instr_id, uint
 }
 
 
-pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t unique_vpage, uint64_t ip, int type, int iflag, bool magic)
+VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t unique_vpage, uint64_t ip, int type, int iflag, bool magic)
 {
 #ifdef SANITY_CHECK
 	if (va == 0) 
@@ -627,6 +643,8 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 #endif
 	uint64_t cstall = 2;
 	uint8_t  swap = 0;
+	PACKET search_packet;
+	search_packet.hit_where = 0;
 	uint64_t high_bit_mask = rotr64(cpu, lg2(NUM_CPUS)),
 		 unique_va = va | high_bit_mask;
 	//uint64_t vpage = unique_va >> LOG2_PAGE_SIZE,
@@ -1243,7 +1261,6 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 			if(debug)
 				cout << "PT MISS" << endl;
 
-			PACKET search_packet;
 			search_packet.address = pt2s >> LOG2_BLOCK_SIZE;
 			search_packet.full_addr = pt2s;
 
@@ -1371,7 +1388,11 @@ pair<uint64_t,uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, u
 
 		}
 	}
-	return make_pair(pa,cstall);
+	VA_TO_PA_RESULT res;
+	res.pa = pa;
+	res.cstall = cstall;
+	res.hit_where = search_packet.hit_where;
+	return res;
 }
 
 void add_stall_prefetch(int cycles, uint32_t cpu){

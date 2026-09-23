@@ -820,8 +820,8 @@ int O3_CPU::prefetch_code_line(uint64_t pf_v_addr, bool cross_pb)
 		if(!cross_pb){
 			pf_pa = (va_to_pa_prefetch(cpu, pf_v_addr, pf_v_addr>>LOG2_PAGE_SIZE) & (~((1 << LOG2_PAGE_SIZE) - 1))) | (pf_v_addr & ((1 << LOG2_PAGE_SIZE) - 1));
 			if(pf_pa == 0){
-				pair<uint64_t, uint64_t> temp = va_to_pa(cpu, 0, pf_v_addr, pf_v_addr>>LOG2_PAGE_SIZE, pf_v_addr, 0, 1, 2);
-				pf_pa = temp.first & (~((1 << LOG2_PAGE_SIZE) - 1)) | (pf_v_addr & ((1 << LOG2_PAGE_SIZE) - 1));
+				VA_TO_PA_RESULT temp = va_to_pa(cpu, 0, pf_v_addr, pf_v_addr>>LOG2_PAGE_SIZE, pf_v_addr, 0, 1, 2);
+				pf_pa = (temp.pa & (~((1 << LOG2_PAGE_SIZE) - 1))) | (pf_v_addr & ((1 << LOG2_PAGE_SIZE) - 1));
 			}
 			penalty = 1;
 			STLB.bpbp[1]++; // same page ... not TLB access needed
@@ -871,24 +871,24 @@ int O3_CPU::prefetch_code_line(uint64_t pf_v_addr, bool cross_pb)
 						penalty = 1;
 					}
 					else{
-						pair<uint64_t, uint64_t> temp = va_to_pa(cpu, 0, pf_v_addr, pf_v_addr>>LOG2_PAGE_SIZE, pf_v_addr, 0, 1, 2);
-						pf_pa = temp.first & (~((1 << LOG2_PAGE_SIZE) - 1)) | (pf_v_addr & ((1 << LOG2_PAGE_SIZE) - 1));
+						VA_TO_PA_RESULT temp = va_to_pa(cpu, 0, pf_v_addr, pf_v_addr>>LOG2_PAGE_SIZE, pf_v_addr, 0, 1, 2);
+						pf_pa = (temp.pa & (~((1 << LOG2_PAGE_SIZE) - 1))) | (pf_v_addr & ((1 << LOG2_PAGE_SIZE) - 1));
 						if(pf_pa == 0){
 							cout << "Error 3" << endl;
 							assert(0);
 						}
-						penalty = temp.second;
+						penalty = temp.cstall;
 					}
 				}
 				else{
-					pair<uint64_t, uint64_t> temp = va_to_pa(cpu, 0, pf_v_addr, pf_v_addr>>LOG2_PAGE_SIZE, pf_v_addr, 0, 1, 2);
-					pf_pa = temp.first & (~((1 << LOG2_PAGE_SIZE) - 1)) | (pf_v_addr & ((1 << LOG2_PAGE_SIZE) - 1));
+					VA_TO_PA_RESULT temp = va_to_pa(cpu, 0, pf_v_addr, pf_v_addr>>LOG2_PAGE_SIZE, pf_v_addr, 0, 1, 2);
+					pf_pa = (temp.pa & (~((1 << LOG2_PAGE_SIZE) - 1))) | (pf_v_addr & ((1 << LOG2_PAGE_SIZE) - 1));
 					
 					if(pf_pa == 0){
 						cout << "Error 4" << endl;
 						assert(0);
 					}
-					penalty = temp.second;
+					penalty = temp.cstall;
 				}
 			}
 		}

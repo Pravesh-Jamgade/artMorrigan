@@ -113,7 +113,13 @@ uint64_t rotl64 (uint64_t n, unsigned int c),
          rotr64 (uint64_t n, unsigned int c),
          va_to_pa_prefetch(uint32_t cpu, uint64_t va, uint64_t unique_vpage);
 
-pair<uint64_t, uint64_t> va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t unique_vpage, uint64_t ip, int type, int iflag, bool magic);
+struct VA_TO_PA_RESULT {
+	uint64_t pa;
+	uint64_t cstall;
+	uint8_t hit_where;
+};
+
+VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t unique_vpage, uint64_t ip, int type, int iflag, bool magic);
 int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t instr_id, uint64_t ip, int type, int iflag);
   //va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t unique_vpage, uint8_t is_code);
 
