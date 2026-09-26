@@ -113,11 +113,22 @@ void write_csv_stats()
 			csv << '\n';
 		}
 		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
-			const vector<string> offset_labels{"off0", "off1", "off2", "off3", "off4", "off5", "off6", "off7"};
 			const vector<string> hit_where_labels{"pwc", "l1d", "l2c", "llc", "dram"};
-			write_csv_vector(csv, prefix + "STLB_sparsity_offset_inserted", offset_labels, ooo_cpu[cpu].STLB.stlb_sparsity_offset_inserted);
+			write_csv_scalar(csv, prefix + "STLB_sparsity_cross_subblock_count", ooo_cpu[cpu].STLB.stlb_sparsity_cross_subblock_count);
 			write_csv_vector(csv, prefix + "STLB_sparsity_hit_where_filter", hit_where_labels, ooo_cpu[cpu].STLB.stlb_sparsity_hit_where);
+			write_csv_scalar(csv, prefix + "STLB_sparsity_existing_way_choosen", ooo_cpu[cpu].STLB.stlb_sparsity_existing_way_count);
+			write_csv_scalar(csv, prefix + "STLB_sparsity_invalid_way_choosen", ooo_cpu[cpu].STLB.stlb_sparsity_invalid_way_count);
+			write_csv_scalar(csv, prefix + "STLB_sparsity_lru_way_choosen", ooo_cpu[cpu].STLB.stlb_sparsity_lru_way_count);
+			write_csv_scalar(csv, prefix + "STLB_sparsity_random_pte_evictions", ooo_cpu[cpu].STLB.stlb_sparsity_random_pte_evictions);
+			write_csv_scalar(csv, prefix + "STLB_sparsity_prefilled_ptes_total", ooo_cpu[cpu].STLB.stlb_sparsity_prefilled_ptes_total);
+			write_csv_scalar(csv, prefix + "STLB_sparsity_prefilled_ptes_hit", ooo_cpu[cpu].STLB.stlb_sparsity_prefilled_ptes_hit);
+			double prefilled_accuracy = (ooo_cpu[cpu].STLB.stlb_sparsity_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.stlb_sparsity_prefilled_ptes_hit / ooo_cpu[cpu].STLB.stlb_sparsity_prefilled_ptes_total);
+			write_csv_scalar(csv, prefix + "STLB_sparsity_prefilled_accuracy_percent", prefilled_accuracy);
 		}
+		write_csv_scalar(csv, prefix + "STLB_prefilled_ptes_total", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
+		write_csv_scalar(csv, prefix + "STLB_prefilled_ptes_hit", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit);
+		double general_prefilled_accuracy = (ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit / ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
+		write_csv_scalar(csv, prefix + "STLB_prefilled_accuracy_percent", general_prefilled_accuracy);
 
 		const char *page_levels[] = {"levelPML4_hits", "levelPDP_hits", "levelPD_hits", "levelPT_hits"};
 		for (uint32_t page_level = 0; page_level < 4; ++page_level) {
@@ -267,15 +278,24 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 			cout << endl;
 		}
 		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
-			cout << "STLB SPARSITY OFFSET INSERTED HISTOGRAM (off0..off7):";
-			for (int off = 0; off < 8; ++off)
-				cout << ' ' << cache->stlb_sparsity_offset_inserted[off];
-			cout << endl;
+			cout << "STLB SPARSITY CROSS SUBBLOCK COUNT: " << cache->stlb_sparsity_cross_subblock_count << endl;
 			cout << "STLB SPARSITY HIT_WHERE FILTER HISTOGRAM (0=pwc 1=l1d 2=l2c 3=llc 4=dram):";
 			for (int hw = 0; hw < 5; ++hw)
 				cout << ' ' << cache->stlb_sparsity_hit_where[hw];
 			cout << endl;
+			cout << "STLB SPARSITY EXISTING WAY COUNT: " << cache->stlb_sparsity_existing_way_count << endl;
+			cout << "STLB SPARSITY INVALID WAY COUNT: " << cache->stlb_sparsity_invalid_way_count << endl;
+			cout << "STLB SPARSITY LRU WAY COUNT: " << cache->stlb_sparsity_lru_way_count << endl;
+			cout << "STLB SPARSITY RANDOM PTE EVICTIONS: " << cache->stlb_sparsity_random_pte_evictions << endl;
+			cout << "STLB SPARSITY PREFILLED PTES TOTAL: " << cache->stlb_sparsity_prefilled_ptes_total << endl;
+			cout << "STLB SPARSITY PREFILLED PTES HIT: " << cache->stlb_sparsity_prefilled_ptes_hit << endl;
+			double prefilled_acc = (cache->stlb_sparsity_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->stlb_sparsity_prefilled_ptes_hit / cache->stlb_sparsity_prefilled_ptes_total);
+			cout << "STLB SPARSITY PREFILLED HIT ACCURACY: " << prefilled_acc << "%" << endl;
 		}
+		cout << "STLB PREFILLED PTES TOTAL: " << cache->stlb_prefilled_ptes_total << endl;
+		cout << "STLB PREFILLED PTES HIT: " << cache->stlb_prefilled_ptes_hit << endl;
+		double gen_prefilled_acc = (cache->stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->stlb_prefilled_ptes_hit / cache->stlb_prefilled_ptes_total);
+		cout << "STLB PREFILLED HIT ACCURACY: " << gen_prefilled_acc << "%" << endl;
 	}
 	if (cache->cache_type == IS_L1D || cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
 		cout << cache->NAME << " PT PTE BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;

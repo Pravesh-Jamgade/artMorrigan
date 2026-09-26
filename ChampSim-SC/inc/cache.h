@@ -145,8 +145,8 @@ class CACHE : public MEMORY {
 			// stlb_sparsity: Stores the 3-bit offset (0..7 within 8-PTE PT block) for each sector slot
 			uint8_t entry_offset_in_block[STLB_PTES_PER_BLOCK];
 			uint32_t lru, rereference_count;
-			uint8_t valid_mask, accessed_mask;
-			STLB_BLOCK_ENTRY() : tag(0), lru(0), rereference_count(0), valid_mask(0), accessed_mask(0) {
+			uint8_t valid_mask, accessed_mask, prefilled_mask;
+			STLB_BLOCK_ENTRY() : tag(0), lru(0), rereference_count(0), valid_mask(0), accessed_mask(0), prefilled_mask(0) {
 				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) {
 					pte[i] = 0;
 					entry_offset_in_block[i] = 0;
@@ -164,8 +164,16 @@ class CACHE : public MEMORY {
 		uint64_t stlb_valid_entries_on_eviction[STLB_PTES_PER_BLOCK + 1];
 		uint64_t stlb_valid_footprint_matrix[STLB_PTES_PER_BLOCK + 1][STLB_PTES_PER_BLOCK + 1]; // [valid][footprint] (footprint: 0..4)
 		// Sparsity mode histograms: PTE offsets inserted (0..7) and hit_where filter source (0=PWC, 1=L1D, 2=L2C, 3=LLC, 4=DRAM)
-		uint64_t stlb_sparsity_offset_inserted[8];
+		uint64_t stlb_sparsity_cross_subblock_count;
 		uint64_t stlb_sparsity_hit_where[5];
+		uint64_t stlb_sparsity_existing_way_count;
+		uint64_t stlb_sparsity_invalid_way_count;
+		uint64_t stlb_sparsity_lru_way_count;
+		uint64_t stlb_sparsity_random_pte_evictions;
+		uint64_t stlb_sparsity_prefilled_ptes_total;
+		uint64_t stlb_sparsity_prefilled_ptes_hit;
+		uint64_t stlb_prefilled_ptes_total;
+		uint64_t stlb_prefilled_ptes_hit;
 		uint64_t translation_valid_entries_on_eviction[9];
 		uint64_t translation_valid_footprint_matrix[9][9]; // [valid][footprint] (footprint: 0..8)
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
@@ -303,8 +311,16 @@ class CACHE : public MEMORY {
 					stlb_valid_entries_on_eviction[i] = 0;
 					for (int j = 0; j <= STLB_PTES_PER_BLOCK; ++j) stlb_valid_footprint_matrix[i][j] = 0;
 				}
-				for (int i = 0; i < 8; ++i) stlb_sparsity_offset_inserted[i] = 0;
+				stlb_sparsity_cross_subblock_count = 0;
 				for (int i = 0; i < 5; ++i) stlb_sparsity_hit_where[i] = 0;
+				stlb_sparsity_existing_way_count = 0;
+				stlb_sparsity_invalid_way_count = 0;
+				stlb_sparsity_lru_way_count = 0;
+				stlb_sparsity_random_pte_evictions = 0;
+				stlb_sparsity_prefilled_ptes_total = 0;
+				stlb_sparsity_prefilled_ptes_hit = 0;
+				stlb_prefilled_ptes_total = 0;
+				stlb_prefilled_ptes_hit = 0;
 				for (int i = 0; i < 9; ++i) {
 					translation_valid_entries_on_eviction[i] = 0;
 					for (int j = 0; j < 9; ++j) translation_valid_footprint_matrix[i][j] = 0;

@@ -1574,6 +1574,10 @@ void CACHE::handle_fill()
 				if (entry.valid_mask && entry.tag == block_vpn) {
 					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
 						if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == offset) {
+							if (entry.prefilled_mask & (1u << s)) {
+								stlb_sparsity_prefilled_ptes_hit++;
+								entry.prefilled_mask &= ~(1u << s);
+							}
 							entry.accessed_mask |= 1u << s;
 							entry.rereference_count++;
 							*ppn = entry.pte[s];
@@ -1594,6 +1598,10 @@ void CACHE::handle_fill()
 			for (uint32_t way = 0; way < NUM_WAY; ++way) {
 				STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
 				if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
+					if (entry.prefilled_mask & (1u << offset)) {
+						stlb_prefilled_ptes_hit++;
+						entry.prefilled_mask &= ~(1u << offset);
+					}
 					entry.accessed_mask |= 1u << offset;
 					entry.rereference_count++;
 					*ppn = entry.pte[offset];
@@ -1638,6 +1646,7 @@ void CACHE::handle_fill()
 
 			// CASE A: Block ALREADY EXISTS in STLB (but requested PTE slot is missing)
 			if (existing_way != -1) {
+				stlb_sparsity_existing_way_count++;
 				STLB_BLOCK_ENTRY &entry = stlb_block[set][existing_way];
 
 				// Install req_offset into this existing block without replacing/resetting the block
@@ -1663,13 +1672,15 @@ void CACHE::handle_fill()
 					// 3. Fallback: randomly pick a slot to evict if all slots are occupied and accessed
 					if (target_slot == -1) {
 						target_slot = rand() % STLB_PTES_PER_BLOCK;
+						stlb_sparsity_random_pte_evictions++;
 					}
 
 					entry.pte[target_slot] = req_ppn;
 					entry.entry_offset_in_block[target_slot] = req_offset;
 					entry.valid_mask |= (1u << target_slot);
 					entry.accessed_mask |= (1u << target_slot);
-					stlb_sparsity_offset_inserted[req_offset & 7]++;
+					entry.prefilled_mask |= 1u << target_slot;
+					stlb_sparsity_prefilled_ptes_total++;
 				}
 
 				// Update LRU for existing block
@@ -1685,22 +1696,25 @@ void CACHE::handle_fill()
 			// CASE B: Block does NOT exist in STLB -> Select way for new entry
 			uint32_t way = NUM_WAY;
 			if (invalid_way != -1) {
+				stlb_sparsity_invalid_way_count++;
 				way = invalid_way;
 			} else if (lru_way != -1) {
+				stlb_sparsity_lru_way_count++;
 				way = lru_way;
 			} else {
+				stlb_sparsity_lru_way_count++;
 				way = 0;
 			}
 
 			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
-			const bool replacing = entry.valid_mask && entry.tag != block_vpn;
-			if (replacing) {
+			if (entry.valid_mask) {
 				evict_stlb_block(entry);
 			}
 
 			entry.tag = block_vpn;
 			entry.valid_mask = 0;
 			entry.accessed_mask = 0;
+			entry.prefilled_mask = 0;
 			entry.rereference_count = 0;
 
 			// Record histogram for hit_where location used as filter source
@@ -1786,8 +1800,9 @@ void CACHE::handle_fill()
 				entry.pte[sector_slot] = page_ppns[req_offset];
 				entry.entry_offset_in_block[sector_slot] = req_offset;
 				entry.valid_mask |= 1u << sector_slot;
+				entry.prefilled_mask |= 1u << sector_slot;
+				stlb_sparsity_prefilled_ptes_total++;
 				filled_offsets_mask |= 1u << req_offset;
-				stlb_sparsity_offset_inserted[req_offset & 7]++;
 				sector_slot++;
 			}
 
@@ -1798,8 +1813,12 @@ void CACHE::handle_fill()
 					entry.pte[sector_slot] = page_ppns[offset];
 					entry.entry_offset_in_block[sector_slot] = offset;
 					entry.valid_mask |= 1u << sector_slot;
+					entry.prefilled_mask |= 1u << sector_slot;
+					stlb_sparsity_prefilled_ptes_total++;
 					filled_offsets_mask |= 1u << offset;
-					stlb_sparsity_offset_inserted[offset & 7]++;
+					if ((req_offset / STLB_PTES_PER_BLOCK) != (offset / STLB_PTES_PER_BLOCK)) {
+						stlb_sparsity_cross_subblock_count++;
+					}
 					sector_slot++;
 				}
 			}
@@ -1810,8 +1829,12 @@ void CACHE::handle_fill()
 					entry.pte[sector_slot] = page_ppns[offset];
 					entry.entry_offset_in_block[sector_slot] = offset;
 					entry.valid_mask |= 1u << sector_slot;
+					entry.prefilled_mask |= 1u << sector_slot;
+					stlb_sparsity_prefilled_ptes_total++;
 					filled_offsets_mask |= 1u << offset;
-					stlb_sparsity_offset_inserted[offset & 7]++;
+					if ((req_offset / STLB_PTES_PER_BLOCK) != (offset / STLB_PTES_PER_BLOCK)) {
+						stlb_sparsity_cross_subblock_count++;
+					}
 					sector_slot++;
 				}
 			}
@@ -1868,19 +1891,25 @@ void CACHE::handle_fill()
 			evict_stlb_block(entry);
 		entry.tag = block_vpn;
 		entry.valid_mask = 0;
+		entry.accessed_mask = 0;
+		entry.prefilled_mask = 0;
 		entry.rereference_count = 0;
-		if (replacing)
-			entry.accessed_mask = 0;
+		const uint32_t req_offset = vpn % STLB_PTES_PER_BLOCK;
 		for (uint32_t offset = 0; offset < STLB_PTES_PER_BLOCK; ++offset) {
 			uint64_t ppn;
 			if (lookup_allocated_pte(owner_cpu, block_vpn * STLB_PTES_PER_BLOCK + offset, &ppn)) {
 				entry.pte[offset] = ppn;
 				entry.entry_offset_in_block[offset] = offset;
 				entry.valid_mask |= 1u << offset;
+				//// since block is being filled we choose to mark all prefill 1
+				// if (offset != req_offset) {
+				entry.prefilled_mask |= 1u << offset;
+				stlb_prefilled_ptes_total++;
+				// }
 			}
 		}
 
-		entry.accessed_mask |= 1u << (vpn % STLB_PTES_PER_BLOCK);
+		entry.accessed_mask |= 1u << req_offset;
 		for (uint32_t other = 0; other < NUM_WAY; ++other)
 			if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
 		entry.lru = 0;
@@ -1939,6 +1968,7 @@ void CACHE::handle_fill()
 		stlb_valid_footprint_matrix[valid_stlb_count][footprint]++;
 
 		entry.accessed_mask = 0;
+		entry.prefilled_mask = 0;
 
 		if (entry.rereference_count) {
 			const uint32_t bucket = rrc_bucket(entry.rereference_count);
