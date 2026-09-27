@@ -1592,25 +1592,29 @@ void CACHE::handle_fill()
 				}
 			}
 		} else {
-			const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
-			const uint32_t offset = vpn % STLB_PTES_PER_BLOCK;
+			const uint64_t block_vpn = vpn / 8;
+			const uint32_t offset = vpn % 8;
 			const uint32_t set = get_set(block_vpn);
 			for (uint32_t way = 0; way < NUM_WAY; ++way) {
 				STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
-				if (entry.valid_mask && entry.tag == block_vpn && (entry.valid_mask & (1u << offset))) {
-					if (entry.prefilled_mask & (1u << offset)) {
-						stlb_prefilled_ptes_hit++;
-						entry.prefilled_mask &= ~(1u << offset);
+				if (entry.valid_mask && entry.tag == block_vpn) {
+					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
+						if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == offset) {
+							if (entry.prefilled_mask & (1u << s)) {
+								stlb_prefilled_ptes_hit++;
+								entry.prefilled_mask &= ~(1u << s);
+							}
+							entry.accessed_mask |= 1u << s;
+							entry.rereference_count++;
+							*ppn = entry.pte[s];
+							if (update_lru) {
+								for (uint32_t other = 0; other < NUM_WAY; ++other)
+									if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
+								entry.lru = 0;
+							}
+							return true;
+						}
 					}
-					entry.accessed_mask |= 1u << offset;
-					entry.rereference_count++;
-					*ppn = entry.pte[offset];
-					if (update_lru) {
-						for (uint32_t other = 0; other < NUM_WAY; ++other)
-							if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
-						entry.lru = 0;
-					}
-					return true;
 				}
 			}
 		}
@@ -1807,8 +1811,15 @@ void CACHE::handle_fill()
 			}
 
 			// Step 2 (stlb_sparsity): Fill footprint entries recorded earlier in L2/LLC
+			// Detail sub-block filling rule:
+			// STLB_PTES_PER_BLOCK == 1: only requested PTE is inserted (already done in Step 1).
+			// STLB_PTES_PER_BLOCK == 2: insert matching offset pair (0,1), (2,3), (4,5), or (6,7).
+			// STLB_PTES_PER_BLOCK == 4: if req_offset < 4 fill lower (0..3), else fill upper (4..7).
 			for (uint32_t offset = 0; offset < 8 && sector_slot < STLB_PTES_PER_BLOCK; ++offset) {
 				if (offset == req_offset) continue;
+				if ((STLB_PTES_PER_BLOCK == 2 && (req_offset / 2) != (offset / 2)) ||
+				    (STLB_PTES_PER_BLOCK == 4 && (req_offset / 4) != (offset / 4))) continue;
+
 				if ((footprint_mask & (1u << offset)) && (valid_entries_mask & (1u << offset))) {
 					entry.pte[sector_slot] = page_ppns[offset];
 					entry.entry_offset_in_block[sector_slot] = offset;
@@ -1826,6 +1837,9 @@ void CACHE::handle_fill()
 			// Step 3 (stlb_sparsity): Fill remaining sector slots from left-over valid entries (in offset order 0..7)
 			for (uint32_t offset = 0; offset < 8 && sector_slot < STLB_PTES_PER_BLOCK; ++offset) {
 				if (!(filled_offsets_mask & (1u << offset)) && (valid_entries_mask & (1u << offset))) {
+					if ((STLB_PTES_PER_BLOCK == 2 && (req_offset / 2) != (offset / 2)) ||
+					    (STLB_PTES_PER_BLOCK == 4 && (req_offset / 4) != (offset / 4))) continue;
+
 					entry.pte[sector_slot] = page_ppns[offset];
 					entry.entry_offset_in_block[sector_slot] = offset;
 					entry.valid_mask |= 1u << sector_slot;
@@ -1855,7 +1869,8 @@ void CACHE::handle_fill()
 			return;
 		}
 
-		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
+		const uint64_t block_vpn = vpn / 8;
+		const uint32_t req_offset = vpn % 8;
 		const uint32_t set = get_set(block_vpn);
 		
 		int existing_way = -1;
@@ -1894,22 +1909,29 @@ void CACHE::handle_fill()
 		entry.accessed_mask = 0;
 		entry.prefilled_mask = 0;
 		entry.rereference_count = 0;
-		const uint32_t req_offset = vpn % STLB_PTES_PER_BLOCK;
-		for (uint32_t offset = 0; offset < STLB_PTES_PER_BLOCK; ++offset) {
+
+		uint32_t sector_slot = 0;
+		for (uint32_t offset = 0; offset < 8 && sector_slot < STLB_PTES_PER_BLOCK; ++offset) {
+			if ((STLB_PTES_PER_BLOCK == 1 && offset != req_offset) ||
+			    (STLB_PTES_PER_BLOCK == 2 && (req_offset / 2) != (offset / 2)) ||
+			    (STLB_PTES_PER_BLOCK == 4 && (req_offset / 4) != (offset / 4))) {
+				continue;
+			}
+
 			uint64_t ppn;
-			if (lookup_allocated_pte(owner_cpu, block_vpn * STLB_PTES_PER_BLOCK + offset, &ppn)) {
-				entry.pte[offset] = ppn;
-				entry.entry_offset_in_block[offset] = offset;
-				entry.valid_mask |= 1u << offset;
-				//// since block is being filled we choose to mark all prefill 1
-				// if (offset != req_offset) {
-				entry.prefilled_mask |= 1u << offset;
+			if (lookup_allocated_pte(owner_cpu, block_vpn * 8 + offset, &ppn)) {
+				entry.pte[sector_slot] = ppn;
+				entry.entry_offset_in_block[sector_slot] = offset;
+				entry.valid_mask |= 1u << sector_slot;
+				entry.prefilled_mask |= 1u << sector_slot;
 				stlb_prefilled_ptes_total++;
-				// }
+				if (offset == req_offset) {
+					entry.accessed_mask |= 1u << sector_slot;
+				}
+				sector_slot++;
 			}
 		}
 
-		entry.accessed_mask |= 1u << req_offset;
 		for (uint32_t other = 0; other < NUM_WAY; ++other)
 			if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
 		entry.lru = 0;
