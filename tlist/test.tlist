@@ -1,0 +1,3 @@
+NAME=bc-0
+TRACE=$(HERMES_TRACE)/bc-0.trace.gz
+KNOBS=

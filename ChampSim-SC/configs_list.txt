@@ -1,0 +1,4 @@
+# Example list of configuration files for batch binary build
+/media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/configs/stlb_study/sparsity_12kb_4pte.ini
+configs/test_12kb_1pte.ini
+configs/tage2.ini
