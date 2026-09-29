@@ -18,7 +18,7 @@ extern STLB_BLOCK_MODE stlb_block_mode;
 bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 
 #define P2TLB 0
-#define PTW_START_LEVEL 1 // 1: L1D, 2: L2C
+#define PTW_START_LEVEL 2 // 1: L1D, 2: L2C
 
 // Free Prefetching
 
@@ -26,13 +26,13 @@ bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 #define ENABLE_FP 0
 
 // flag for prefetch page walks
-#define ENABLE_PREF_FP 1
+#define ENABLE_PREF_FP 0
 
 // Lookahead Depth (0:disable)
 #define LA_DEPTH 0
 
 // Replacement Policy for Markov's prediction table --> [ 0:LRU, 1:LFU, 2:RANDOM, 3:... ]
-#define RP_MP 1
+#define RP_MP 0
 
 // Number of prediction table entries you randomly select from for eviction in LFU replacement policy for the Markov instruction TLB prefetcher
 #define LLIMIT 5
@@ -99,7 +99,7 @@ bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 #define STLB_LATENCY 8
 // Number of adjacent page-table entries represented by one detail-mode STLB
 // block. Supported values are powers of two so VPN decomposition is cheap.
-#define STLB_PTES_PER_BLOCK 4
+#define STLB_PTES_PER_BLOCK 1
 
 // L1 INSTRUCTION CACHE
 #define L1I_SET 64
@@ -422,9 +422,9 @@ class CACHE : public MEMORY {
 
 		// functions
 		pair<int, int> check_hit_stlb_pq(uint64_t vpn);
-		bool stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru = true);
-		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint8_t hit_where = 0);
-		void stlb_block_invalidate(uint64_t vpn);
+		bool stlb_block_lookup(uint64_t vpn, uint64_t full_addr, uint64_t *ppn, bool update_lru = true);
+		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint64_t full_addr, uint8_t hit_where = 0);
+		void stlb_block_invalidate(uint64_t vpn, uint64_t full_addr=0);
 		void evict_stlb_block(STLB_BLOCK_ENTRY &entry);
 
 		int  add_rq(PACKET *packet),
@@ -439,7 +439,7 @@ class CACHE : public MEMORY {
 			 get_size(uint8_t queue_type, uint64_t address);
 
 		int  check_hit(PACKET *packet),
-		     invalidate_entry(uint64_t inval_addr),
+		     invalidate_entry(uint64_t inval_addr, uint64_t full_addr),
 		     check_mshr(PACKET *packet),
 		     prefetch_line(uint64_t ip, uint64_t base_addr, uint64_t pf_addr, int prefetch_fill_level, uint32_t prefetch_metadata),
 		     kpc_prefetch_line(uint64_t base_addr, uint64_t pf_addr, int prefetch_fill_level, int delta, int depth, int signature, int confidence, uint32_t prefetch_metadata),

@@ -90,22 +90,23 @@ void write_csv_stats()
 				write_csv_scalar(csv, key + "_footprint_evictions", level->footprint_evictions[type]);
 				write_csv_vector(csv, key + "_footprint", cache_labels, level->footprint[type]);
 			}
-		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_SPARSITY ? "_sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "_detail" : "_default"));
-		write_csv_scalar(csv, prefix + "STLB_hits" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_hits);
-		write_csv_scalar(csv, prefix + "STLB_misses" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_misses);
-		write_csv_scalar(csv, prefix + "STLB_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
+		const string stlb_key_prefix = (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "SHADOW_STLB" : "STLB");
+		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_SPARSITY ? "_sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "_detail" : (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "" : "_default")));
+		write_csv_scalar(csv, prefix + stlb_key_prefix + "_hits" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_hits);
+		write_csv_scalar(csv, prefix + stlb_key_prefix + "_misses" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_misses);
+		write_csv_scalar(csv, prefix + "STLB_shadow_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
 		vector<string> stlb_footprint_labels;
 		for (uint32_t ptes = 1; ptes <= STLB_PTES_PER_BLOCK; ++ptes)
 			stlb_footprint_labels.push_back(to_string(ptes));
-		write_csv_vector(csv, prefix + "STLB_block_footprint", stlb_footprint_labels,
+		write_csv_vector(csv, prefix + "STLB_shadow_block_footprint", stlb_footprint_labels,
 			ooo_cpu[cpu].STLB.stlb_block_footprint);
 		vector<string> stlb_valid_labels;
 		for (uint32_t valid = 0; valid <= STLB_PTES_PER_BLOCK; ++valid)
 			stlb_valid_labels.push_back(to_string(valid));
-		write_csv_vector(csv, prefix + "STLB_valid_entries_on_eviction", stlb_valid_labels,
+		write_csv_vector(csv, prefix + "STLB_shadow_valid_entries_on_eviction", stlb_valid_labels,
 			ooo_cpu[cpu].STLB.stlb_valid_entries_on_eviction);
 
-		csv << "STLB_VALID_FOOTPRINT_MATRIX," << cpu << "\nvalid,fp0,fp1,fp2,fp3,fp4\n";
+		csv << "STLB_SHADOW_VALID_FOOTPRINT_MATRIX," << cpu << "\nvalid,fp0,fp1,fp2,fp3,fp4\n";
 		for (uint32_t v = 0; v <= STLB_PTES_PER_BLOCK; ++v) {
 			csv << v;
 			for (uint32_t fp = 0; fp <= STLB_PTES_PER_BLOCK; ++fp)
@@ -125,10 +126,18 @@ void write_csv_stats()
 			double prefilled_accuracy = (ooo_cpu[cpu].STLB.stlb_sparsity_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.stlb_sparsity_prefilled_ptes_hit / ooo_cpu[cpu].STLB.stlb_sparsity_prefilled_ptes_total);
 			write_csv_scalar(csv, prefix + "STLB_sparsity_prefilled_accuracy_percent", prefilled_accuracy);
 		}
-		write_csv_scalar(csv, prefix + "STLB_prefilled_ptes_total", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
-		write_csv_scalar(csv, prefix + "STLB_prefilled_ptes_hit", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit);
-		double general_prefilled_accuracy = (ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit / ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
-		write_csv_scalar(csv, prefix + "STLB_prefilled_accuracy_percent", general_prefilled_accuracy);
+		if (stlb_block_mode == STLB_BLOCK_DETAIL) {
+			write_csv_scalar(csv, prefix + "STLB_detail_prefilled_ptes_total", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
+			write_csv_scalar(csv, prefix + "STLB_detail_prefilled_ptes_hit", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit);
+			double detail_prefilled_accuracy = (ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit / ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
+			write_csv_scalar(csv, prefix + "STLB_detail_prefilled_accuracy_percent", detail_prefilled_accuracy);
+		}
+		if (stlb_block_mode == STLB_BLOCK_ANALYSIS) {
+			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_ptes_total", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
+			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_ptes_hit", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit);
+			double shadow_prefilled_accuracy = (ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit / ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
+			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_accuracy_percent", shadow_prefilled_accuracy);
+		}
 
 		const char *page_levels[] = {"levelPML4_hits", "levelPDP_hits", "levelPD_hits", "levelPT_hits"};
 		for (uint32_t page_level = 0; page_level < 4; ++page_level) {
@@ -260,7 +269,10 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 	cout << " AVERAGE MISS LATENCY: " << (1.0*(cache->total_miss_latency))/TOTAL_MISS << " cycles" << endl;
 	if (cache->NAME == "STLB") {
 		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_SPARSITY ? "sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : "default"));
-		cout << "STLB HITS_" << stlb_suffix << ": " << cache->stlb_block_hits << " MISSES_" << stlb_suffix << ": " << cache->stlb_block_misses << endl;
+		if (stlb_block_mode == STLB_BLOCK_ANALYSIS)
+			cout << "SHADOW STLB BLOCK HITS: " << cache->stlb_block_hits << " SHADOW STLB BLOCK MISSES: " << cache->stlb_block_misses << endl;
+		else
+			cout << "STLB HITS_" << stlb_suffix << ": " << cache->stlb_block_hits << " MISSES_" << stlb_suffix << ": " << cache->stlb_block_misses << endl;
 		cout << "SHADOW STLB BLOCK EVICTIONS: " << cache->stlb_block_evictions << endl;
 		cout << "SHADOW STLB BLOCK FOOTPRINT (PTEs 1.." << STLB_PTES_PER_BLOCK << "):";
 		for (int footprint = 0; footprint < STLB_PTES_PER_BLOCK; ++footprint)
@@ -292,10 +304,18 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 			double prefilled_acc = (cache->stlb_sparsity_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->stlb_sparsity_prefilled_ptes_hit / cache->stlb_sparsity_prefilled_ptes_total);
 			cout << "STLB SPARSITY PREFILLED HIT ACCURACY: " << prefilled_acc << "%" << endl;
 		}
-		cout << "STLB PREFILLED PTES TOTAL: " << cache->stlb_prefilled_ptes_total << endl;
-		cout << "STLB PREFILLED PTES HIT: " << cache->stlb_prefilled_ptes_hit << endl;
-		double gen_prefilled_acc = (cache->stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->stlb_prefilled_ptes_hit / cache->stlb_prefilled_ptes_total);
-		cout << "STLB PREFILLED HIT ACCURACY: " << gen_prefilled_acc << "%" << endl;
+		if (stlb_block_mode == STLB_BLOCK_DETAIL) {
+			cout << "STLB DETAIL PREFILLED PTES TOTAL: " << cache->stlb_prefilled_ptes_total << endl;
+			cout << "STLB DETAIL PREFILLED PTES HIT: " << cache->stlb_prefilled_ptes_hit << endl;
+			double detail_prefilled_acc = (cache->stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->stlb_prefilled_ptes_hit / cache->stlb_prefilled_ptes_total);
+			cout << "STLB DETAIL PREFILLED HIT ACCURACY: " << detail_prefilled_acc << "%" << endl;
+		}
+		if (stlb_block_mode == STLB_BLOCK_ANALYSIS) {
+			cout << "SHADOW STLB PREFILLED PTES TOTAL: " << cache->stlb_prefilled_ptes_total << endl;
+			cout << "SHADOW STLB PREFILLED PTES HIT: " << cache->stlb_prefilled_ptes_hit << endl;
+			double shadow_prefilled_acc = (cache->stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->stlb_prefilled_ptes_hit / cache->stlb_prefilled_ptes_total);
+			cout << "SHADOW STLB PREFILLED HIT ACCURACY: " << shadow_prefilled_acc << "%" << endl;
+		}
 	}
 	if (cache->cache_type == IS_L1D || cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
 		cout << cache->NAME << " PT PTE BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;
@@ -730,15 +750,20 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 			page_queue.pop();
 			page_queue.push(vpage);
 
-			ooo_cpu[cpu].ITLB.invalidate_entry(NRU_vpage);
-			ooo_cpu[cpu].DTLB.invalidate_entry(NRU_vpage);
-			ooo_cpu[cpu].STLB.invalidate_entry(NRU_vpage);
+			
 			for (uint32_t i=0; i<BLOCK_SIZE; i++) {
 				uint64_t cl_addr = (mapped_ppage << LOG2_BLOCK_SIZE) | i;
-				ooo_cpu[cpu].L1I.invalidate_entry(cl_addr);
-				ooo_cpu[cpu].L1D.invalidate_entry(cl_addr);
-				ooo_cpu[cpu].L2C.invalidate_entry(cl_addr);
-				uncore.LLC.invalidate_entry(cl_addr);
+
+				// since we are indexin using cacheline but tag from vpn
+				uint64_t tlb_claddr = (NRU_vpage << LOG2_BLOCK_SIZE) | i;
+				ooo_cpu[cpu].ITLB.invalidate_entry(NRU_vpage, tlb_claddr);
+				ooo_cpu[cpu].DTLB.invalidate_entry(NRU_vpage, tlb_claddr);
+				ooo_cpu[cpu].STLB.invalidate_entry(NRU_vpage, tlb_claddr);
+
+				ooo_cpu[cpu].L1I.invalidate_entry(cl_addr, cl_addr);
+				ooo_cpu[cpu].L1D.invalidate_entry(cl_addr, cl_addr);
+				ooo_cpu[cpu].L2C.invalidate_entry(cl_addr, cl_addr);
+				uncore.LLC.invalidate_entry(cl_addr, cl_addr);
 			}
 
 			swap = 1;

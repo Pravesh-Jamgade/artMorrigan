@@ -14,7 +14,8 @@ class BLOCK {
 			used,
 			ptw_level,
 			translation_footprint,
-			access_footprint[3];
+			access_footprint[3],
+			stlb_prefilled; // baseline/default STLB analysis mode prefill tracking
 
 		int delta,
 		    depth,
@@ -45,6 +46,7 @@ class BLOCK {
 			translation_rereference_count = 0;
 			for (int i = 0; i < 3; ++i)
 				access_footprint[i] = 0;
+			stlb_prefilled = 0;
 
 			delta = 0;
 			depth = 0;

@@ -945,7 +945,8 @@ void CACHE::handle_fill()
 								if (cache_type == IS_STLB) {
 									if (stlb_block_mode == STLB_BLOCK_ANALYSIS) {
 										uint64_t ignored_ppn;
-										if (stlb_block_lookup(RQ.entry[index].address, &ignored_ppn))
+										PACKET entry = RQ.entry[index];
+										if (stlb_block_lookup(entry.address, (entry.full_addr ? entry.full_addr : entry.address), &ignored_ppn))
 											stlb_block_hits++;
 										else
 											stlb_block_misses++;
@@ -1051,7 +1052,6 @@ void CACHE::handle_fill()
 
 									RQ.entry[index].data = pa >> LOG2_PAGE_SIZE; 
 									RQ.entry[index].event_cycle = current_core_cycle[read_cpu];
-									stlb_block_fill(read_cpu, RQ.entry[index].address, RQ.entry[index].hit_where);
 									return_data(&RQ.entry[index]);
 
 									if(iflag == 1){
@@ -1562,11 +1562,11 @@ void CACHE::handle_fill()
 			block[set][way].rereference_count++;
 	}
 
-	bool CACHE::stlb_block_lookup(uint64_t vpn, uint64_t *ppn, bool update_lru)
+	bool CACHE::stlb_block_lookup(uint64_t vpn, uint64_t full_addr, uint64_t *ppn, bool update_lru)
 	{
 		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
-			const uint64_t block_vpn = vpn / 8; // 8 PTEs per 4KB PT block
-			const uint32_t offset = vpn % 8;
+			const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK; // STLB tag granularity (matches fill & invalidate)
+			const uint32_t offset = vpn % 8;  // offset within the 64-byte leaf PT cache line
 			const uint32_t set = get_set(block_vpn);
 			for (uint32_t way = 0; way < NUM_WAY; ++way) {
 				STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
@@ -1592,8 +1592,8 @@ void CACHE::handle_fill()
 				}
 			}
 		} else {
-			const uint64_t block_vpn = vpn / 8;
-			const uint32_t offset = vpn % 8;
+			const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK; // STLB tag granularity (matches fill & invalidate)
+			const uint32_t offset = vpn % 8;  // offset within the 64-byte leaf PT cache line
 			const uint32_t set = get_set(block_vpn);
 			for (uint32_t way = 0; way < NUM_WAY; ++way) {
 				STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
@@ -1621,13 +1621,17 @@ void CACHE::handle_fill()
 		return false;
 	}
 
-	void CACHE::stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint8_t hit_where)
+	void CACHE::stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint64_t full_addr, uint8_t hit_where)
 	{
 		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
 			// stlb_sparsity fill:
 			// Instead of fetching consecutive neighbouring PTEs, fetch p sector entries (STLB_PTES_PER_BLOCK)
 			// prioritizing: 1. Requested PTE, 2. Previously accessed footprint PTEs in L2/LLC, 3. Left-over valid PTEs.
-			const uint64_t block_vpn = vpn / 8; // 8 PTEs per PT block
+			// we storing STLB_PTES_PER_BLOCK in single line of stlb, new tag
+			const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK; 
+			// since leaf PT block holds 8 entries
+			uint64_t leaf_ptblock_addr = vpn / 8;
+			// 8 PTEs per PT block at leaf PT block
 			const uint32_t req_offset = vpn % 8;
 			const uint32_t set = get_set(block_vpn);
 
@@ -1652,10 +1656,10 @@ void CACHE::handle_fill()
 			if (existing_way != -1) {
 				stlb_sparsity_existing_way_count++;
 				STLB_BLOCK_ENTRY &entry = stlb_block[set][existing_way];
-
+				
 				// Install req_offset into this existing block without replacing/resetting the block
 				uint64_t req_ppn = 0;
-				if (lookup_allocated_pte(owner_cpu, block_vpn * 8 + req_offset, &req_ppn)) {
+				if (lookup_allocated_pte(owner_cpu, leaf_ptblock_addr * 8 + req_offset, &req_ppn)) {
 					int target_slot = -1;
 					// 1. First preference: an un-allocated (invalid) slot
 					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
@@ -1727,11 +1731,26 @@ void CACHE::handle_fill()
 
 			// Check L2C / LLC footprint recorded earlier for this 8-PTE PT block
 			uint64_t cr3 = 0x200000;
-			uint64_t base_pt_offset = (LOG2_PAGE_SIZE == 12) ?
-				(cr3 + 512 * 8 + 512 * 512 * 8 + 512 * 512 * 512 * 8) :
-				(cr3 + 512 * 8 + 512 * 512 * 8);
-			uint64_t base_vpage = block_vpn * 8;
-			uint64_t pte_address = base_pt_offset + base_vpage * 8;
+			uint64_t base_pt_offset = 
+				(cr3 + 512 * 8 + 512 * 512 * 8 + 512 * 512 * 512 * 8);
+
+			// Byte address of the requested leaf PTE — matches PTW formula:
+			// pt2s = base_pt_offset + pml4_idx*512³*8 + pdp_idx*512²*8 + pd_idx*512*8 + pt_idx*8
+			//      = base_pt_offset + VPN * 8
+
+			uint64_t pt_index, pd_index, pdp_index, pml4_index;
+
+			pt_index   = (vpn & 0x00000000001ff);
+			pd_index   = ((vpn>>9) & 0x00000000001ff);
+			pdp_index  = ((vpn>>18) & 0x00000000001ff);
+			pml4_index = ((vpn>>27) & 0x00000000001ff);
+			
+			// The L2C/LLC cache line containing this PTE is found via >> LOG2_BLOCK_SIZE.
+			uint64_t pte_address = base_pt_offset
+			       + pml4_index * 512 * 512 * 512 * 8 
+			       + pdp_index * 512 * 512 * 8 
+			       + pd_index * 512 * 8
+			       + pt_index * 8;
 
 			uint8_t footprint_mask = 0;
 			// Use hit_where information to decide footprint query order:
@@ -1790,7 +1809,7 @@ void CACHE::handle_fill()
 			uint64_t page_ppns[8] = {0};
 			for (uint32_t offset = 0; offset < 8; ++offset) {
 				uint64_t ppn;
-				if (lookup_allocated_pte(owner_cpu, base_vpage + offset, &ppn)) {
+				if (lookup_allocated_pte(owner_cpu, leaf_ptblock_addr * 8 + offset, &ppn)) {
 					valid_entries_mask |= 1u << offset;
 					page_ppns[offset] = ppn;
 				}
@@ -1810,11 +1829,7 @@ void CACHE::handle_fill()
 				sector_slot++;
 			}
 
-			// Step 2 (stlb_sparsity): Fill footprint entries recorded earlier in L2/LLC
-			// Detail sub-block filling rule:
-			// STLB_PTES_PER_BLOCK == 1: only requested PTE is inserted (already done in Step 1).
-			// STLB_PTES_PER_BLOCK == 2: insert matching offset pair (0,1), (2,3), (4,5), or (6,7).
-			// STLB_PTES_PER_BLOCK == 4: if req_offset < 4 fill lower (0..3), else fill upper (4..7).
+			// Step 2 (stlb_sparsity): Fill footprint entries recorded earlier in L2/LLC from the same sub-block region
 			for (uint32_t offset = 0; offset < 8 && sector_slot < STLB_PTES_PER_BLOCK; ++offset) {
 				if (offset == req_offset) continue;
 				if ((STLB_PTES_PER_BLOCK == 2 && (req_offset / 2) != (offset / 2)) ||
@@ -1834,12 +1849,9 @@ void CACHE::handle_fill()
 				}
 			}
 
-			// Step 3 (stlb_sparsity): Fill remaining sector slots from left-over valid entries (in offset order 0..7)
+			// Step 3 (stlb_sparsity): Fill remaining sector slots from left-over valid entries (in offset order 0..7) regardless of region
 			for (uint32_t offset = 0; offset < 8 && sector_slot < STLB_PTES_PER_BLOCK; ++offset) {
 				if (!(filled_offsets_mask & (1u << offset)) && (valid_entries_mask & (1u << offset))) {
-					if ((STLB_PTES_PER_BLOCK == 2 && (req_offset / 2) != (offset / 2)) ||
-					    (STLB_PTES_PER_BLOCK == 4 && (req_offset / 4) != (offset / 4))) continue;
-
 					entry.pte[sector_slot] = page_ppns[offset];
 					entry.entry_offset_in_block[sector_slot] = offset;
 					entry.valid_mask |= 1u << sector_slot;
@@ -1869,7 +1881,9 @@ void CACHE::handle_fill()
 			return;
 		}
 
-		const uint64_t block_vpn = vpn / 8;
+		// adjust tag based on number of PTE we are intended to fill in stlb
+		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
+		// from within 64 byte leaf PT block holding our requested PTE
 		const uint32_t req_offset = vpn % 8;
 		const uint32_t set = get_set(block_vpn);
 		
@@ -1911,6 +1925,8 @@ void CACHE::handle_fill()
 		entry.rereference_count = 0;
 
 		uint32_t sector_slot = 0;
+		// iterate over  all PTE from cache line holding leaf PT block
+		uint64_t block_vpn_addr = vpn / 8;
 		for (uint32_t offset = 0; offset < 8 && sector_slot < STLB_PTES_PER_BLOCK; ++offset) {
 			if ((STLB_PTES_PER_BLOCK == 1 && offset != req_offset) ||
 			    (STLB_PTES_PER_BLOCK == 2 && (req_offset / 2) != (offset / 2)) ||
@@ -1919,7 +1935,7 @@ void CACHE::handle_fill()
 			}
 
 			uint64_t ppn;
-			if (lookup_allocated_pte(owner_cpu, block_vpn * 8 + offset, &ppn)) {
+			if (lookup_allocated_pte(owner_cpu, block_vpn_addr * 8 + offset, &ppn)) {
 				entry.pte[sector_slot] = ppn;
 				entry.entry_offset_in_block[sector_slot] = offset;
 				entry.valid_mask |= 1u << sector_slot;
@@ -1937,10 +1953,10 @@ void CACHE::handle_fill()
 		entry.lru = 0;
 	}
 
-	void CACHE::stlb_block_invalidate(uint64_t vpn)
+	void CACHE::stlb_block_invalidate(uint64_t vpn, uint64_t full_addr)
 	{
 		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
-			const uint64_t block_vpn = vpn / 8;
+			const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
 			const uint32_t offset = vpn % 8;
 			const uint32_t set = get_set(block_vpn);
 			for (uint32_t way = 0; way < NUM_WAY; ++way) {
@@ -1948,8 +1964,9 @@ void CACHE::handle_fill()
 				if (entry.valid_mask && entry.tag == block_vpn) {
 					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
 						if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == offset) {
-							entry.valid_mask &= ~(1u << s);
-							entry.accessed_mask &= ~(1u << s);
+							entry.valid_mask    &= ~(1u << s);
+							entry.accessed_mask  &= ~(1u << s);
+							entry.prefilled_mask &= ~(1u << s);
 						}
 					}
 					if (!entry.valid_mask)
@@ -1959,13 +1976,25 @@ void CACHE::handle_fill()
 			return;
 		}
 
+		// since detail mode only fills the sub-block around requested offset like 
+		// example if STLB_PTES_PER_BLOCK==2 && req_offset=1 (1,2)
+		// example if STLB_PTES_PER_BLOCK==2 && req_offset=5 (4,5) as 4/2 == 5/2 = 2
+		// example if STLB_PTES_PER_BLOCK==4 && req_offset=1 (0,1,2,3) as 0/4 == 1/4 == 2/4 == 3/4 = 0
+		// example if STLB_PTES_PER_BLOCK==4 && req_offset=5 (4,5,6,7) as 4/4 == 5/4 == 6/4 == 7/4 = 1
+		// And PTE at this offset are inserted from 0 to STLB_PTES_PER_BLOCK
 		const uint64_t block_vpn = vpn / STLB_PTES_PER_BLOCK;
-		const uint32_t offset = vpn % STLB_PTES_PER_BLOCK;
+		const uint32_t offset = vpn % 8;
 		const uint32_t set = get_set(block_vpn);
 		for (uint32_t way = 0; way < NUM_WAY; ++way) {
 			STLB_BLOCK_ENTRY &entry = stlb_block[set][way];
 			if (entry.valid_mask && entry.tag == block_vpn) {
-				entry.valid_mask &= ~(1u << offset);
+				for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
+					if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == offset) {
+						entry.valid_mask    &= ~(1u << s);
+						entry.accessed_mask  &= ~(1u << s);
+						entry.prefilled_mask &= ~(1u << s);
+					}
+				}
 				if (!entry.valid_mask)
 					evict_stlb_block(entry);
 			}
@@ -2013,7 +2042,7 @@ void CACHE::handle_fill()
 	{
 		record_footprint_on_eviction(set, way);
 		if (cache_type == IS_STLB)
-			stlb_block_fill(packet->cpu, packet->address, packet->hit_where);
+			stlb_block_fill(packet->cpu, packet->address, packet->full_addr, packet->hit_where);
 
 #ifdef SANITY_CHECK
 		if (cache_type == IS_ITLB) {
@@ -2041,6 +2070,11 @@ void CACHE::handle_fill()
 			block[set][way].valid = 1;
 		block[set][way].dirty = 0;
 		block[set][way].prefetch = (packet->type == PREFETCH) ? 1 : 0;
+		block[set][way].stlb_prefilled = 0;
+		if (cache_type == IS_STLB && stlb_block_mode == STLB_BLOCK_ANALYSIS) {
+			block[set][way].stlb_prefilled = 1;
+			stlb_prefilled_ptes_total++;
+		}
 		block[set][way].used = 0;
 		block[set][way].ptw_level = UINT8_MAX;
 		block[set][way].translation_footprint = 0;
@@ -2092,7 +2126,7 @@ void CACHE::handle_fill()
 	{
 		if (cache_type == IS_STLB && (stlb_block_mode == STLB_BLOCK_DETAIL || stlb_block_mode == STLB_BLOCK_SPARSITY)) {
 			uint64_t ppn = 0;
-			if (stlb_block_lookup(packet->address, &ppn)) {
+			if (stlb_block_lookup(packet->address, (packet->full_addr ? packet->full_addr: packet->address), &ppn)) {
 				stlb_block_hits++;
 				packet->data = ppn;
 				return 0; // The detail/sparsity mode hit path reads data from the packet.
@@ -2100,7 +2134,12 @@ void CACHE::handle_fill()
 			stlb_block_misses++;
 			return -1;
 		}
-		uint64_t cl_addr = packet->full_addr ? (packet->full_addr >> LOG2_BLOCK_SIZE) : packet->address;
+		// For STLB: address = VPN (the key used during fill).
+		// For other caches: cache-line address derived from full_addr.
+		// Using full_addr >> LOG2_BLOCK_SIZE for STLB would index into bits [13:6] of VA
+		// (which include page-offset bits), while fill uses get_set(VPN) = bits [19:12].
+		// This mismatch caused every baseline STLB lookup to probe the wrong set → ~99.99% miss rate.
+		uint64_t cl_addr = (cache_type == IS_STLB) ? packet->address : (packet->full_addr ? (packet->full_addr >> LOG2_BLOCK_SIZE) : packet->address);
 		uint32_t set = get_set(cl_addr);
 		int match_way = -1;
 
@@ -2116,6 +2155,12 @@ void CACHE::handle_fill()
 			if (block[set][way].valid && (block[set][way].tag == packet->address)) {
 
 				match_way = way;
+				if (cache_type == IS_STLB && stlb_block_mode == STLB_BLOCK_ANALYSIS) {
+					if (block[set][way].stlb_prefilled) {
+						stlb_prefilled_ptes_hit++;
+						block[set][way].stlb_prefilled = 0;
+					}
+				}
 
 				DP ( if (warmup_complete[packet->cpu]) {
 						cout << "[" << NAME << "] " << __func__ << " instr_id: " << packet->instr_id << " type: " << +packet->type << hex << " addr: " << packet->address;
@@ -2130,10 +2175,10 @@ void CACHE::handle_fill()
 		return match_way;
 	}
 
-	int CACHE::invalidate_entry(uint64_t inval_addr)
+	int CACHE::invalidate_entry(uint64_t inval_addr, uint64_t full_addr)
 	{
 		if (cache_type == IS_STLB)
-			stlb_block_invalidate(inval_addr);
+			stlb_block_invalidate(inval_addr, full_addr);
 		uint32_t set = get_set(inval_addr);
 		int match_way = -1;
 
