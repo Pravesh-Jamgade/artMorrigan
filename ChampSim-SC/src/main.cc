@@ -94,19 +94,26 @@ void write_csv_stats()
 		const string stlb_suffix = (stlb_block_mode == STLB_BLOCK_SPARSITY ? "_sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "_detail" : (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "" : "_default")));
 		write_csv_scalar(csv, prefix + stlb_key_prefix + "_hits" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_hits);
 		write_csv_scalar(csv, prefix + stlb_key_prefix + "_misses" + stlb_suffix, ooo_cpu[cpu].STLB.stlb_block_misses);
-		write_csv_scalar(csv, prefix + "STLB_shadow_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
+		string stlb_mode_prefix = "STLB";
+		if (stlb_block_mode == STLB_BLOCK_ANALYSIS) stlb_mode_prefix = "SHADOW_STLB";
+		else if (stlb_block_mode == STLB_BLOCK_SPARSITY) stlb_mode_prefix = "STLB_SPARSITY";
+		else if (stlb_block_mode == STLB_BLOCK_DETAIL) stlb_mode_prefix = "STLB_DETAIL";
+		
+		write_csv_scalar(csv, prefix + stlb_mode_prefix + "_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
 		vector<string> stlb_footprint_labels;
 		for (uint32_t ptes = 1; ptes <= STLB_PTES_PER_BLOCK; ++ptes)
 			stlb_footprint_labels.push_back(to_string(ptes));
-		write_csv_vector(csv, prefix + "STLB_shadow_block_footprint", stlb_footprint_labels,
+		write_csv_vector(csv, prefix + stlb_mode_prefix + "_block_footprint", stlb_footprint_labels,
 			ooo_cpu[cpu].STLB.stlb_block_footprint);
 		vector<string> stlb_valid_labels;
 		for (uint32_t valid = 0; valid <= STLB_PTES_PER_BLOCK; ++valid)
 			stlb_valid_labels.push_back(to_string(valid));
-		write_csv_vector(csv, prefix + "STLB_shadow_valid_entries_on_eviction", stlb_valid_labels,
+		write_csv_vector(csv, prefix + stlb_mode_prefix + "_valid_entries_on_eviction", stlb_valid_labels,
 			ooo_cpu[cpu].STLB.stlb_valid_entries_on_eviction);
 
-		csv << "STLB_SHADOW_VALID_FOOTPRINT_MATRIX," << cpu << "\nvalid,fp0,fp1,fp2,fp3,fp4\n";
+		csv << stlb_mode_prefix << "_VALID_FOOTPRINT_MATRIX," << cpu << "\nvalid";
+		for (uint32_t fp = 0; fp <= STLB_PTES_PER_BLOCK; ++fp) csv << ",fp" << fp;
+		csv << "\n";
 		for (uint32_t v = 0; v <= STLB_PTES_PER_BLOCK; ++v) {
 			csv << v;
 			for (uint32_t fp = 0; fp <= STLB_PTES_PER_BLOCK; ++fp)
@@ -139,11 +146,24 @@ void write_csv_stats()
 			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_accuracy_percent", shadow_prefilled_accuracy);
 		}
 
-		const char *page_levels[] = {"levelPML4_hits", "levelPDP_hits", "levelPD_hits", "levelPT_hits"};
-		for (uint32_t page_level = 0; page_level < 4; ++page_level) {
+		uint64_t ptes_per_page = PAGE_SIZE / 8;
+		uint64_t log2_ptes = lg2(ptes_per_page);
+		int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
+
+		for (int page_level = 0; page_level < walk_depth; ++page_level) {
+			string level_label = "level";
+			if (page_level == walk_depth - 1) {
+				level_label += "PT_hits";
+			} else if (walk_depth == 4) {
+				if (page_level == 0) level_label += "PML4_hits";
+				else if (page_level == 1) level_label += "PDP_hits";
+				else if (page_level == 2) level_label += "PD_hits";
+			} else {
+				level_label += to_string(walk_depth - 1 - page_level) + "_hits";
+			}
 			const uint64_t *hits = ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[page_level];
-			csv << "PTW," << cpu << ',' << page_levels[page_level] << ",pwc,l1d,l1i,l2c,llc,dram\n";
-			csv << "PTW," << cpu << ',' << page_levels[page_level] << ','
+			csv << "PTW," << cpu << ',' << level_label << ",pwc,l1d,l1i,l2c,llc,dram\n";
+			csv << "PTW," << cpu << ',' << level_label << ','
 				<< ooo_cpu[cpu].STLB.pagetable_pwc_hits[page_level] << ',' << hits[0]
 				<< ",0," << hits[1] << ',' << hits[2] << ',' << hits[3] << '\n';
 		}
@@ -909,28 +929,23 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 
 		if (!asap && ideal != 1) {
 			for (int lvl = walk_depth - 1; lvl >= 0; --lvl) {
-				// For standard 4-level: lvl=3 (PML4), lvl=2 (PDP), lvl=1 (PD), lvl=0 (PT)
-				// MMU hit index: 0 for PML4, 1 for PDP, 2 for PD
-				int mapped_mmu_idx = (walk_depth > 3 && lvl >= 1 && lvl <= 3) ? (3 - lvl) : -1;
-				if (walk_depth == 3 && lvl >= 1 && lvl <= 2) mapped_mmu_idx = 2 - lvl;
+				int mapped_mmu_idx = -1;
+				if (lvl > 0 && lvl >= walk_depth - 3) {
+					mapped_mmu_idx = (walk_depth - 1) - lvl;
+				}
 				
 				bool hit = false;
 				if (mapped_mmu_idx >= 0 && mapped_mmu_idx < 3) {
 					hit = mmu_hit[mapped_mmu_idx];
 				}
-				if (walk_depth > 4 && lvl >= 4) {
-					hit = false; // No MMU cache for these levels
-				}
 
-				// stat_idx is 0 for PML4/root, 1 for PDP, 2 for PD, 3 for PT
-				int stat_idx = 3 - lvl;
-				if (stat_idx < 0) stat_idx = 0;
-				if (stat_idx > 3) stat_idx = 3;
+				int stat_idx = (walk_depth - 1) - lvl;
 
 				if (!hit) {
 					uint64_t addr = level_addrs[lvl];
 					search_packet.address = addr >> LOG2_BLOCK_SIZE;
 					search_packet.full_addr = addr;
+					search_packet.cpu = cpu;
 
 					set = ooo_cpu[cpu].L1D.get_set(addr >> LOG2_BLOCK_SIZE);
 					way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
@@ -1156,23 +1171,23 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 		PACKET search_packet;
 
 		for (int lvl = walk_depth - 1; lvl >= 0; --lvl) {
-			int mapped_mmu_idx = (walk_depth > 3 && lvl >= 1 && lvl <= 3) ? (3 - lvl) : -1;
-			if (walk_depth == 3 && lvl >= 1 && lvl <= 2) mapped_mmu_idx = 2 - lvl;
+			int mapped_mmu_idx = -1;
+			if (lvl > 0 && lvl >= walk_depth - 3) {
+				mapped_mmu_idx = (walk_depth - 1) - lvl;
+			}
 			
 			bool hit = false;
 			if (mapped_mmu_idx >= 0 && mapped_mmu_idx < 3) {
 				hit = mmu_hit[mapped_mmu_idx];
 			}
-			if (walk_depth > 4 && lvl >= 4) hit = false;
 
-			int stat_idx = 3 - lvl;
-			if (stat_idx < 0) stat_idx = 0;
-			if (stat_idx > 3) stat_idx = 3;
+			int stat_idx = (walk_depth - 1) - lvl;
 
 			if (!hit) {
 				uint64_t addr = level_addrs[lvl];
 				search_packet.address = addr >> LOG2_BLOCK_SIZE;
 				search_packet.full_addr = addr;
+				search_packet.cpu = cpu;
 
 				set = ooo_cpu[cpu].L1D.get_set(addr >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;

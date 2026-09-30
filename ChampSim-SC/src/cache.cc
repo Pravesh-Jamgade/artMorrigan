@@ -1476,12 +1476,18 @@ void CACHE::handle_fill()
 
 		// for l1/l2/llc
 		const uint32_t translation_entries = footprint_size(victim.translation_footprint);
-		if (victim.ptw_level == 3 && (cache_type == IS_L1D || cache_type == IS_L2C || cache_type == IS_LLC)) {
+		uint64_t ptes_per_page = PAGE_SIZE / 8;
+		uint64_t log2_ptes = lg2(ptes_per_page);
+		int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
+		int leaf_ptw = walk_depth - 1;
+		if (victim.ptw_level == leaf_ptw && (cache_type == IS_L1D || cache_type == IS_L2C || cache_type == IS_LLC)) {
 			uint64_t cr3 = 0x200000;
-			uint64_t ptes_per_page = PAGE_SIZE / 8;
-			uint64_t base_pt_offset = (LOG2_PAGE_SIZE == 12) ?
-				(cr3 + ptes_per_page * 8 + ptes_per_page * ptes_per_page * 8 + ptes_per_page * ptes_per_page * ptes_per_page * 8) :
-				(cr3 + ptes_per_page * 8 + ptes_per_page * ptes_per_page * 8);
+			uint64_t base_pt_offset = cr3;
+			for (int j = 1; j < walk_depth; j++) {
+				uint64_t multiplier = 1;
+				for (int k = 0; k < walk_depth - j; k++) multiplier *= ptes_per_page;
+				base_pt_offset += multiplier * 8;
+			}
 			uint64_t pte_address = victim.address << LOG2_BLOCK_SIZE;
 			if (pte_address >= base_pt_offset) {
 				uint64_t vpage = (pte_address - base_pt_offset) / 8;
@@ -1492,6 +1498,9 @@ void CACHE::handle_fill()
 					uint64_t ppn;
 					if (lookup_allocated_pte(owner_cpu, base_vpage + i, &ppn))
 						valid_count++;
+				}
+				if (valid_count == 0 && translation_entries > 0) {
+					std::cout << "VALID_COUNT_0 pte_address=" << std::hex << pte_address << " base_pt_offset=" << base_pt_offset << " base_vpage=" << base_vpage << std::dec << "\n";
 				}
 				translation_valid_entries_on_eviction[valid_count]++;
 				translation_valid_footprint_matrix[valid_count][translation_entries]++;
@@ -1538,12 +1547,17 @@ void CACHE::handle_fill()
 
 	void CACHE::mark_translation_access(uint32_t set, uint32_t way, uint64_t pte_address, uint8_t ptw_level, bool rereference)
 	{
-		assert(ptw_level < 4);
+		uint64_t ptes_per_page = PAGE_SIZE / 8;
+		uint64_t log2_ptes = lg2(ptes_per_page);
+		int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
+		int leaf_ptw = walk_depth - 1;
+
+		assert(ptw_level < walk_depth);
 		block[set][way].ptw_level = ptw_level;
 		// Only the leaf PT contains translation PTEs. Upper-level radix entries
 		// retain their level metadata but must not contribute to translation
 		// footprint or translation re-reference metrics.
-		if (ptw_level != 3)
+		if (ptw_level != leaf_ptw)
 			return;
 		block[set][way].translation_footprint |= 1u << ((pte_address >> 3) & 7);
 		if (rereference) {
@@ -1735,26 +1749,27 @@ void CACHE::handle_fill()
 			uint64_t ptes_per_page = PAGE_SIZE / 8;
 			uint64_t pte_mask = ptes_per_page - 1;
 			uint64_t log2_ptes = lg2(ptes_per_page);
+			
+			int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
+			int leaf_ptw = walk_depth - 1;
 
-			uint64_t base_pt_offset = 
-				(cr3 + ptes_per_page * 8 + ptes_per_page * ptes_per_page * 8 + ptes_per_page * ptes_per_page * ptes_per_page * 8);
+			uint64_t base_pt_offset = cr3;
+			for (int j = 1; j < walk_depth; j++) {
+				uint64_t multiplier = 1;
+				for (int k = 0; k < walk_depth - j; k++) multiplier *= ptes_per_page;
+				base_pt_offset += multiplier * 8;
+			}
 
 			// Byte address of the requested leaf PTE
-			// pt2s = base_pt_offset + pml4_idx*ptes_per_page³*8 + pdp_idx*ptes_per_page²*8 + pd_idx*ptes_per_page*8 + pt_idx*8
-
-			uint64_t pt_index, pd_index, pdp_index, pml4_index;
-
-			pt_index   = (vpn & pte_mask);
-			pd_index   = ((vpn>>log2_ptes) & pte_mask);
-			pdp_index  = ((vpn>>(2*log2_ptes)) & pte_mask);
-			pml4_index = ((vpn>>(3*log2_ptes)) & pte_mask);
+			uint64_t index_offset = 0;
+			for (int j = 0; j < walk_depth; j++) {
+				uint64_t idx = (vpn >> (j * log2_ptes)) & pte_mask;
+				uint64_t multiplier = 1;
+				for (int k = 0; k < j; k++) multiplier *= ptes_per_page;
+				index_offset += idx * multiplier * 8;
+			}
 			
-			// The L2C/LLC cache line containing this PTE is found via >> LOG2_BLOCK_SIZE.
-			uint64_t pte_address = base_pt_offset
-			       + pml4_index * ptes_per_page * ptes_per_page * ptes_per_page * 8 
-			       + pdp_index * ptes_per_page * ptes_per_page * 8 
-			       + pd_index * ptes_per_page * 8
-			       + pt_index * 8;
+			uint64_t pte_address = base_pt_offset + index_offset;
 
 			uint8_t footprint_mask = 0;
 			// Use hit_where information to decide footprint query order:
@@ -1766,7 +1781,7 @@ void CACHE::handle_fill()
 				for (uint32_t w = 0; w < uncore.LLC.NUM_WAY; ++w) {
 					if (uncore.LLC.block[llc_set][w].valid &&
 					    uncore.LLC.block[llc_set][w].tag == (pte_address >> LOG2_BLOCK_SIZE) &&
-					    uncore.LLC.block[llc_set][w].ptw_level == 3) {
+					    uncore.LLC.block[llc_set][w].ptw_level == leaf_ptw) {
 						footprint_mask = uncore.LLC.block[llc_set][w].translation_footprint;
 						break;
 					}
@@ -1777,7 +1792,7 @@ void CACHE::handle_fill()
 					for (uint32_t w = 0; w < ooo_cpu[owner_cpu].L2C.NUM_WAY; ++w) {
 						if (ooo_cpu[owner_cpu].L2C.block[l2_set][w].valid &&
 						    ooo_cpu[owner_cpu].L2C.block[l2_set][w].tag == (pte_address >> LOG2_BLOCK_SIZE) &&
-						    ooo_cpu[owner_cpu].L2C.block[l2_set][w].ptw_level == 3) {
+						    ooo_cpu[owner_cpu].L2C.block[l2_set][w].ptw_level == leaf_ptw) {
 							footprint_mask = ooo_cpu[owner_cpu].L2C.block[l2_set][w].translation_footprint;
 							break;
 						}
@@ -1789,7 +1804,7 @@ void CACHE::handle_fill()
 				for (uint32_t w = 0; w < ooo_cpu[owner_cpu].L2C.NUM_WAY; ++w) {
 					if (ooo_cpu[owner_cpu].L2C.block[l2_set][w].valid &&
 					    ooo_cpu[owner_cpu].L2C.block[l2_set][w].tag == (pte_address >> LOG2_BLOCK_SIZE) &&
-					    ooo_cpu[owner_cpu].L2C.block[l2_set][w].ptw_level == 3) {
+					    ooo_cpu[owner_cpu].L2C.block[l2_set][w].ptw_level == leaf_ptw) {
 						footprint_mask = ooo_cpu[owner_cpu].L2C.block[l2_set][w].translation_footprint;
 						break;
 					}
@@ -1800,7 +1815,7 @@ void CACHE::handle_fill()
 					for (uint32_t w = 0; w < uncore.LLC.NUM_WAY; ++w) {
 						if (uncore.LLC.block[llc_set][w].valid &&
 						    uncore.LLC.block[llc_set][w].tag == (pte_address >> LOG2_BLOCK_SIZE) &&
-						    uncore.LLC.block[llc_set][w].ptw_level == 3) {
+						    uncore.LLC.block[llc_set][w].ptw_level == leaf_ptw) {
 							footprint_mask = uncore.LLC.block[llc_set][w].translation_footprint;
 							break;
 						}

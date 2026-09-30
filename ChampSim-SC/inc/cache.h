@@ -237,11 +237,11 @@ class CACHE : public MEMORY {
 
 		uint64_t pml4[PML4_SET][PML4_WAY], pdp[PDP_SET][PDP_WAY], pd[PD_SET][PD_WAY];
 		uint64_t pml4_lru[PML4_SET][PML4_WAY], pdp_lru[PDP_SET][PDP_WAY], pd_lru[PD_SET][PD_WAY];
-		uint64_t mmu_cache_demand_hits[4], mmu_cache_prefetch_hits[4];
+		uint64_t mmu_cache_demand_hits[10], mmu_cache_prefetch_hits[10];
 		uint64_t mmu_timer;
 
-		uint64_t pagetable_mr_hit_ratio[4][4];
-		uint64_t pagetable_pwc_hits[4];
+		uint64_t pagetable_mr_hit_ratio[10][4];
+		uint64_t pagetable_pwc_hits[10];
 		uint64_t rfhits[2];
 		uint64_t free_hits[14];
 
@@ -330,12 +330,12 @@ class CACHE : public MEMORY {
 					for (int j = 0; j < 8; ++j) translation_rrc_footprint[i][j] = 0;
 				}
 
-				for(int i=0; i<4; i++){
+				for(int i=0; i<10; i++){
 					mmu_cache_demand_hits[i] = 0;
 					mmu_cache_prefetch_hits[i] = 0;
 				}
 
-				for(int i=0; i<4; i++){
+				for(int i=0; i<10; i++){
 					pagetable_pwc_hits[i] = 0;
 					for(int j=0; j<4; j++){
 						pagetable_mr_hit_ratio[i][j] = 0;
