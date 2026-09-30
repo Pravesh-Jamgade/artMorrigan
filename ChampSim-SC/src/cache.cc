@@ -1478,9 +1478,10 @@ void CACHE::handle_fill()
 		const uint32_t translation_entries = footprint_size(victim.translation_footprint);
 		if (victim.ptw_level == 3 && (cache_type == IS_L1D || cache_type == IS_L2C || cache_type == IS_LLC)) {
 			uint64_t cr3 = 0x200000;
+			uint64_t ptes_per_page = PAGE_SIZE / 8;
 			uint64_t base_pt_offset = (LOG2_PAGE_SIZE == 12) ?
-				(cr3 + 512 * 8 + 512 * 512 * 8 + 512 * 512 * 512 * 8) :
-				(cr3 + 512 * 8 + 512 * 512 * 8);
+				(cr3 + ptes_per_page * 8 + ptes_per_page * ptes_per_page * 8 + ptes_per_page * ptes_per_page * ptes_per_page * 8) :
+				(cr3 + ptes_per_page * 8 + ptes_per_page * ptes_per_page * 8);
 			uint64_t pte_address = victim.address << LOG2_BLOCK_SIZE;
 			if (pte_address >= base_pt_offset) {
 				uint64_t vpage = (pte_address - base_pt_offset) / 8;
@@ -1731,25 +1732,28 @@ void CACHE::handle_fill()
 
 			// Check L2C / LLC footprint recorded earlier for this 8-PTE PT block
 			uint64_t cr3 = 0x200000;
-			uint64_t base_pt_offset = 
-				(cr3 + 512 * 8 + 512 * 512 * 8 + 512 * 512 * 512 * 8);
+			uint64_t ptes_per_page = PAGE_SIZE / 8;
+			uint64_t pte_mask = ptes_per_page - 1;
+			uint64_t log2_ptes = lg2(ptes_per_page);
 
-			// Byte address of the requested leaf PTE — matches PTW formula:
-			// pt2s = base_pt_offset + pml4_idx*512³*8 + pdp_idx*512²*8 + pd_idx*512*8 + pt_idx*8
-			//      = base_pt_offset + VPN * 8
+			uint64_t base_pt_offset = 
+				(cr3 + ptes_per_page * 8 + ptes_per_page * ptes_per_page * 8 + ptes_per_page * ptes_per_page * ptes_per_page * 8);
+
+			// Byte address of the requested leaf PTE
+			// pt2s = base_pt_offset + pml4_idx*ptes_per_page³*8 + pdp_idx*ptes_per_page²*8 + pd_idx*ptes_per_page*8 + pt_idx*8
 
 			uint64_t pt_index, pd_index, pdp_index, pml4_index;
 
-			pt_index   = (vpn & 0x00000000001ff);
-			pd_index   = ((vpn>>9) & 0x00000000001ff);
-			pdp_index  = ((vpn>>18) & 0x00000000001ff);
-			pml4_index = ((vpn>>27) & 0x00000000001ff);
+			pt_index   = (vpn & pte_mask);
+			pd_index   = ((vpn>>log2_ptes) & pte_mask);
+			pdp_index  = ((vpn>>(2*log2_ptes)) & pte_mask);
+			pml4_index = ((vpn>>(3*log2_ptes)) & pte_mask);
 			
 			// The L2C/LLC cache line containing this PTE is found via >> LOG2_BLOCK_SIZE.
 			uint64_t pte_address = base_pt_offset
-			       + pml4_index * 512 * 512 * 512 * 8 
-			       + pdp_index * 512 * 512 * 8 
-			       + pd_index * 512 * 8
+			       + pml4_index * ptes_per_page * ptes_per_page * ptes_per_page * 8 
+			       + pdp_index * ptes_per_page * ptes_per_page * 8 
+			       + pd_index * ptes_per_page * 8
 			       + pt_index * 8;
 
 			uint8_t footprint_mask = 0;

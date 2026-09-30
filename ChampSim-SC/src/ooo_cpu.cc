@@ -96,6 +96,23 @@ void O3_CPU::read_from_trace()
 				if (num_mem_ops > 0) 
 					arch_instr.is_memory = 1;
 
+				if (instr_unique_id < 4 && cpu == 0) {
+					cout << "Trace Addr (Cloudsuite) " << instr_unique_id << " IP: 0x" << hex << arch_instr.ip << dec 
+					     << ", Width: " << sizeof(arch_instr.ip) * 8 << " bits" << endl;
+					for (uint32_t i = 0; i < MAX_INSTR_DESTINATIONS; i++) {
+						if (arch_instr.destination_memory[i]) {
+							cout << "  Dest Mem[" << i << "]: 0x" << hex << arch_instr.destination_memory[i] << dec 
+							     << ", Width: " << sizeof(arch_instr.destination_memory[i]) * 8 << " bits" << endl;
+						}
+					}
+					for (int i = 0; i < NUM_INSTR_SOURCES; i++) {
+						if (arch_instr.source_memory[i]) {
+							cout << "  Src Mem[" << i << "]: 0x" << hex << arch_instr.source_memory[i] << dec 
+							     << ", Width: " << sizeof(arch_instr.source_memory[i]) * 8 << " bits" << endl;
+						}
+					}
+				}
+
 				// add this instruction to the IFETCH_BUFFER
 				if (IFETCH_BUFFER.occupancy < IFETCH_BUFFER.SIZE) {
 					uint32_t ifetch_buffer_index = add_to_ifetch_buffer(&arch_instr);
@@ -277,6 +294,23 @@ void O3_CPU::read_from_trace()
 				arch_instr.num_mem_ops = num_mem_ops;
 				if (num_mem_ops > 0) 
 					arch_instr.is_memory = 1;
+
+				if (instr_unique_id < 4 && cpu == 0) {
+					cout << "Trace Addr " << instr_unique_id << " IP: 0x" << hex << arch_instr.ip << dec 
+					     << ", Width: " << sizeof(arch_instr.ip) * 8 << " bits" << endl;
+					for (uint32_t i = 0; i < MAX_INSTR_DESTINATIONS; i++) {
+						if (arch_instr.destination_memory[i]) {
+							cout << "  Dest Mem[" << i << "]: 0x" << hex << arch_instr.destination_memory[i] << dec 
+							     << ", Width: " << sizeof(arch_instr.destination_memory[i]) * 8 << " bits" << endl;
+						}
+					}
+					for (int i = 0; i < NUM_INSTR_SOURCES; i++) {
+						if (arch_instr.source_memory[i]) {
+							cout << "  Src Mem[" << i << "]: 0x" << hex << arch_instr.source_memory[i] << dec 
+							     << ", Width: " << sizeof(arch_instr.source_memory[i]) * 8 << " bits" << endl;
+						}
+					}
+				}
 
 				// determine what kind of branch this is, if any
 				if(!reads_sp && !reads_flags && writes_ip && !reads_other)

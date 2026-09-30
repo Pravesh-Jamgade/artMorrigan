@@ -832,15 +832,11 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 	int mmu_hit[3] = {0,0,0};
 	uint64_t compare_pml4, compare_pdp, compare_pd;
 
-	if(LOG2_PAGE_SIZE == 12){
-		compare_pml4 = vpage>>27; 
-		compare_pdp  = vpage>>18; 
-		compare_pd   = vpage>>9; 
-	}
-	else{
-		compare_pml4 = vpage>>18; 
-		compare_pdp  = vpage>>9; 
-	}
+	uint64_t ptes_per_page = PAGE_SIZE / 8;
+	uint64_t log2_ptes = lg2(ptes_per_page);
+	compare_pml4 = vpage >> (3 * log2_ptes);
+	compare_pdp  = vpage >> (2 * log2_ptes);
+	compare_pd   = vpage >> (1 * log2_ptes);
 
 	ooo_cpu[cpu].STLB.mmu_timer++;
 
@@ -876,557 +872,172 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 		for (uint32_t level = 0; level < 3; ++level)
 			if (mmu_hit[level])
 				ooo_cpu[cpu].STLB.pagetable_pwc_hits[level]++;
+
 		uint64_t cr3 = 0x200000;
+		uint64_t ptes_per_page = PAGE_SIZE / 8;
+		uint64_t log2_ptes = lg2(ptes_per_page);
+		uint64_t pte_mask = ptes_per_page - 1;
+		int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
 
-		uint64_t pt_index, pd_index, pdp_index, pml4_index;
-
-		if(LOG2_PAGE_SIZE == 12){
-			pt_index   = (vpage & 0x00000000001ff);
-			pd_index   = ((vpage>>9) & 0x00000000001ff);
-			pdp_index  = ((vpage>>18) & 0x00000000001ff);
-			pml4_index = ((vpage>>27) & 0x00000000001ff);
-		}
-		else{
-			pt_index   = (vpage & 0x00000000001ff);
-			pdp_index  = ((vpage>>9) & 0x00000000001ff);
-			pml4_index = ((vpage>>18) & 0x00000000001ff);
-		}
-
-		uint64_t pml42s, pdp2s, pd2s, pt2s;
-
-		if(LOG2_PAGE_SIZE == 12){
-			pml42s = cr3 + pml4_index * 8;
-
-			pdp2s  = cr3 + 512 * 8 \
-				 + pml4_index * 512 * 8 \
-				 + pdp_index * 8;
-
-			pd2s = cr3 + 512 * 8 \
-			       + 512 * 512 * 8 \
-			       + pml4_index * 512 * 512 * 8 \
-			       + pdp_index * 512 * 8 \
-			       + pd_index * 8;
-
-			pt2s = cr3 + 512 * 8 \
-			       + 512 * 512 * 8 \
-			       + 512 * 512 * 512 * 8 \
-			       + pml4_index * 512 * 512 * 512 * 8 \
-			       + pdp_index * 512 * 512 * 8 \
-			       + pd_index * 512 * 8\
-			       + pt_index * 8;
-		}
-		else{
-			pml42s = cr3 + pml4_index * 8;
-
-			pdp2s  = cr3 + 512 * 8 \
-				 + pml4_index * 512 * 8 \
-				 + pdp_index * 8;
-
-			pt2s = cr3 + 512 * 8 \
-			       + 512 * 512 * 8 \
-			       + pml4_index * 512 * 512 * 8 \
-			       + pdp_index * 512 * 8 \
-			       + pt_index * 8;
+		uint64_t level_addrs[10];
+		for (int i = 0; i < walk_depth; i++) {
+			uint64_t offset = 0;
+			for (int j = i + 1; j < walk_depth; j++) {
+				uint64_t multiplier = 1;
+				for (int k = 0; k < walk_depth - j; k++) multiplier *= ptes_per_page;
+				offset += multiplier * 8;
+			}
+			uint64_t index_offset = 0;
+			for (int j = i; j < walk_depth; j++) {
+				uint64_t idx = (vpage >> (j * log2_ptes)) & pte_mask;
+				uint64_t multiplier = 1;
+				for (int k = 0; k < j - i; k++) multiplier *= ptes_per_page;
+				index_offset += idx * multiplier * 8;
+			}
+			level_addrs[i] = cr3 + offset + index_offset;
 		}
 
 		cstall = 2;
-
 		uint32_t set, way_fill;
 		int way_read;
-
-		int debug = 0; 
-
-		if(debug) cout << "\nNEW PAGE WALK " << endl;
+		int debug = 0;
+		if (debug) cout << "\nNEW PAGE WALK " << endl;
 
 		int asap = ASAP;
 		int ideal = iflag * IDEAL;
+		PACKET search_packet;
 
-		if(!asap && ideal!=1){
-			if(mmu_hit[0] == 0){
-				PACKET search_packet;
-				search_packet.address = pml42s >> LOG2_BLOCK_SIZE;
-				search_packet.full_addr = pml42s;
-
-				set = ooo_cpu[cpu].L1D.get_set(pml42s >> LOG2_BLOCK_SIZE);
-				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
-
-				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pml42s, 0);
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][0]++;
-					if(!magic){
-						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, 0, type, 1);
-						ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
-					}
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
+		if (!asap && ideal != 1) {
+			for (int lvl = walk_depth - 1; lvl >= 0; --lvl) {
+				// For standard 4-level: lvl=3 (PML4), lvl=2 (PDP), lvl=1 (PD), lvl=0 (PT)
+				// MMU hit index: 0 for PML4, 1 for PDP, 2 for PD
+				int mapped_mmu_idx = (walk_depth > 3 && lvl >= 1 && lvl <= 3) ? (3 - lvl) : -1;
+				if (walk_depth == 3 && lvl >= 1 && lvl <= 2) mapped_mmu_idx = 2 - lvl;
+				
+				bool hit = false;
+				if (mapped_mmu_idx >= 0 && mapped_mmu_idx < 3) {
+					hit = mmu_hit[mapped_mmu_idx];
 				}
-				else{
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
+				if (walk_depth > 4 && lvl >= 4) {
+					hit = false; // No MMU cache for these levels
+				}
 
-					if(!magic && PTW_START_LEVEL == 1){
-						way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, pml42s, type);
+				// stat_idx is 0 for PML4/root, 1 for PDP, 2 for PD, 3 for PT
+				int stat_idx = 3 - lvl;
+				if (stat_idx < 0) stat_idx = 0;
+				if (stat_idx > 3) stat_idx = 3;
 
-						ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
-						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, pml42s, ip, 0, type, 0);
+				if (!hit) {
+					uint64_t addr = level_addrs[lvl];
+					search_packet.address = addr >> LOG2_BLOCK_SIZE;
+					search_packet.full_addr = addr;
 
-						if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0)
-							ooo_cpu[cpu].L1D.block[set][way_fill].valid = 1;
+					set = ooo_cpu[cpu].L1D.get_set(addr >> LOG2_BLOCK_SIZE);
+					way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
-						ooo_cpu[cpu].L1D.block[set][way_fill].dirty = 0;
-						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
-						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
-
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pml42s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pml42s, 0, false);
-						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
-						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
-					}
-
-					set = ooo_cpu[cpu].L2C.get_set(pml42s >> LOG2_BLOCK_SIZE);
-					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
-
-					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pml42s, 0);
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][1]++;
-						if(!magic){
-							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, 0, type, 1);
-							ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
+					if (way_read >= 0) {
+						if (lvl == 0) search_packet.hit_where = 1;
+						ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, addr, stat_idx);
+						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][0]++;
+						if (!magic) {
+							ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, (lvl==0)?type:0, type, 1);
+							ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
 						}
-						cstall+=L2C_LATENCY;
-					}
-					else{
-						cstall+=L2C_LATENCY;
+						cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
+					} else {
+						cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
 
-						if(!magic){
-							way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, pml42s, type);
+						if (!magic && PTW_START_LEVEL == 1) {
+							way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, addr, type);
+							ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
+							ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, addr, ip, (lvl==0)?ooo_cpu[cpu].L1D.block[set][way_fill].full_addr:0, type, 0);
 
-							ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
-							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, pml42s, ip, 0, type, 0);
-
-							if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0)
-								ooo_cpu[cpu].L2C.block[set][way_fill].valid = 1; 
-
-							ooo_cpu[cpu].L2C.block[set][way_fill].dirty = 0; 
-							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
-							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
-
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pml42s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pml42s, 0, false);
-							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
-							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
+							if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0) ooo_cpu[cpu].L1D.block[set][way_fill].valid = 1;
+							ooo_cpu[cpu].L1D.block[set][way_fill].dirty = 0;
+							ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
+							ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
+							ooo_cpu[cpu].L1D.block[set][way_fill].tag = addr >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L1D.block[set][way_fill].address = addr >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = addr;
+							ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, addr, stat_idx, false);
+							ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
+							ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
 						}
 
-						set = uncore.LLC.get_set(pml42s >> LOG2_BLOCK_SIZE);
-						way_read = uncore.LLC.check_hit(&search_packet);
-						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pml42s, 0);
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][2]++;
-							if(!magic){
-								uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
-								uncore.LLC.block[set][way_read].used = 1;
+						set = ooo_cpu[cpu].L2C.get_set(addr >> LOG2_BLOCK_SIZE);
+						way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
+
+						if (way_read >= 0) {
+							if (lvl == 0) search_packet.hit_where = 2;
+							ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, addr, stat_idx);
+							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][1]++;
+							if (!magic) {
+								ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, (lvl==0)?type:0, type, 1);
+								ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
 							}
-							cstall+=LLC_LATENCY;
-						}
-						else{
-							cstall+=LLC_LATENCY;
+							cstall += L2C_LATENCY;
+						} else {
+							cstall += L2C_LATENCY;
 
-							if(!magic){
-								way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, pml42s, type);
+							if (!magic) {
+								way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, addr, type);
+								ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
+								ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, addr, ip, (lvl==0)?ooo_cpu[cpu].L2C.block[set][way_fill].full_addr:0, type, 0);
 
-								uncore.LLC.record_footprint_on_eviction(set, way_fill);
-								uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, pml42s, ip, 0, type, 0);
-
-								if (uncore.LLC.block[set][way_fill].valid == 0)
-									uncore.LLC.block[set][way_fill].valid = 1;
-
-								uncore.LLC.block[set][way_fill].dirty = 0;
-								uncore.LLC.block[set][way_fill].prefetch = 0;
-								uncore.LLC.block[set][way_fill].used = 0;
-
-								uncore.LLC.block[set][way_fill].tag = pml42s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].address = pml42s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].full_addr = pml42s;
-								uncore.LLC.mark_translation_access(set, way_fill, pml42s, 0, false);
-								uncore.LLC.block[set][way_fill].data = 55;
-								uncore.LLC.block[set][way_fill].cpu = cpu;
+								if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0) ooo_cpu[cpu].L2C.block[set][way_fill].valid = 1;
+								ooo_cpu[cpu].L2C.block[set][way_fill].dirty = 0;
+								ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
+								ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
+								ooo_cpu[cpu].L2C.block[set][way_fill].tag = addr >> LOG2_BLOCK_SIZE;
+								ooo_cpu[cpu].L2C.block[set][way_fill].address = addr >> LOG2_BLOCK_SIZE;
+								ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = addr;
+								ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, addr, stat_idx, false);
+								ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
+								ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
 							}
 
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][3]++;
-							issue_ptw_dram_read(cpu, pml42s, instr_id, ip, type, 0);
-							cstall += 200;
-						}
-					}
-				}
-			}
+							set = uncore.LLC.get_set(addr >> LOG2_BLOCK_SIZE);
+							way_read = uncore.LLC.check_hit(&search_packet);
 
-			if(mmu_hit[1] == 0){
-				PACKET search_packet;
-				search_packet.address = pdp2s >> LOG2_BLOCK_SIZE;
-				search_packet.full_addr = pdp2s;
+							if (way_read >= 0) {
+								if (lvl == 0) search_packet.hit_where = 3;
+								uncore.LLC.mark_translation_access(set, way_read, addr, stat_idx);
+								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][2]++;
+								if (!magic) {
+									uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
+									uncore.LLC.block[set][way_read].used = 1;
+								}
+								cstall += LLC_LATENCY;
+							} else {
+								if (lvl == 0) search_packet.hit_where = 4;
+								cstall += LLC_LATENCY;
 
-				set = ooo_cpu[cpu].L1D.get_set(pdp2s >> LOG2_BLOCK_SIZE);
-				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
+								if (!magic) {
+									way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, addr, type);
+									uncore.LLC.record_footprint_on_eviction(set, way_fill);
+									uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, addr, ip, (lvl==0)?uncore.LLC.block[set][way_fill].full_addr:0, type, 0);
 
-				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pdp2s, 1);
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][0]++;
-					if(!magic){
-						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, type, type, 1);
-						ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
-					}
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-				}
-				else{
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
+									if (uncore.LLC.block[set][way_fill].valid == 0) uncore.LLC.block[set][way_fill].valid = 1;
+									uncore.LLC.block[set][way_fill].dirty = 0;
+									uncore.LLC.block[set][way_fill].prefetch = 0;
+									uncore.LLC.block[set][way_fill].used = 0;
+									uncore.LLC.block[set][way_fill].tag = addr >> LOG2_BLOCK_SIZE;
+									uncore.LLC.block[set][way_fill].address = addr >> LOG2_BLOCK_SIZE;
+									uncore.LLC.block[set][way_fill].full_addr = addr;
+									uncore.LLC.mark_translation_access(set, way_fill, addr, stat_idx, false);
+									uncore.LLC.block[set][way_fill].data = 55;
+									uncore.LLC.block[set][way_fill].cpu = cpu;
+								}
 
-					if(!magic && PTW_START_LEVEL == 1){
-						way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, pdp2s, type);
-
-						ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
-						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, pdp2s, ip, ooo_cpu[cpu].L1D.block[set][way_fill].full_addr, type, 0);
-
-						if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0)
-							ooo_cpu[cpu].L1D.block[set][way_fill].valid = 1;
-
-						ooo_cpu[cpu].L1D.block[set][way_fill].dirty = 0;
-						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
-						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
-
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pdp2s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pdp2s, 1, false);
-						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
-						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
-					}
-
-					set = ooo_cpu[cpu].L2C.get_set(pdp2s >> LOG2_BLOCK_SIZE);
-					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
-					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pdp2s, 1);
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][1]++;
-						if(!magic){
-							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, type, type, 1);
-							ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
-						}
-						cstall+=L2C_LATENCY;
-					}
-					else{
-						cstall += L2C_LATENCY;
-
-						if(!magic){
-							way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, pdp2s, type);
-
-							ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
-							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, pdp2s, ip, ooo_cpu[cpu].L2C.block[set][way_fill].full_addr, type, 0);
-
-							if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0)
-								ooo_cpu[cpu].L2C.block[set][way_fill].valid = 1;
-
-							ooo_cpu[cpu].L2C.block[set][way_fill].dirty = 0;
-							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
-							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
-
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pdp2s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pdp2s, 1, false);
-							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
-							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
-						}
-
-						set = uncore.LLC.get_set(pdp2s >> LOG2_BLOCK_SIZE);
-						way_read = uncore.LLC.check_hit(&search_packet);
-						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pdp2s, 1);
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][2]++;
-							if(!magic){
-								uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
-								uncore.LLC.block[set][way_read].used = 1;
+								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][3]++;
+								issue_ptw_dram_read(cpu, addr, instr_id, ip, type, stat_idx);
+								cstall += 200;
 							}
-							cstall += LLC_LATENCY;
 						}
-						else{
-							cstall += LLC_LATENCY;
-
-							if(!magic){
-								way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, pdp2s, type);
-
-								uncore.LLC.record_footprint_on_eviction(set, way_fill);
-								uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, pdp2s, ip, uncore.LLC.block[set][way_fill].full_addr, type, 0);
-
-								if (uncore.LLC.block[set][way_fill].valid == 0)
-									uncore.LLC.block[set][way_fill].valid = 1;
-
-								uncore.LLC.block[set][way_fill].dirty = 0;
-								uncore.LLC.block[set][way_fill].prefetch = 0;
-								uncore.LLC.block[set][way_fill].used = 0;
-
-								uncore.LLC.block[set][way_fill].tag = pdp2s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].address = pdp2s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].full_addr = pdp2s;
-								uncore.LLC.mark_translation_access(set, way_fill, pdp2s, 1, false);
-								uncore.LLC.block[set][way_fill].data = 55;
-								uncore.LLC.block[set][way_fill].cpu = cpu;
-							}
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][3]++;
-							issue_ptw_dram_read(cpu, pdp2s, instr_id, ip, type, 1);
-							cstall += 200;
-						}
-					}
-				}
-			}
-
-			if((mmu_hit[2] == 0) && (LOG2_PAGE_SIZE == 12)){
-
-				PACKET search_packet;
-				search_packet.address = pd2s >> LOG2_BLOCK_SIZE;
-				search_packet.full_addr = pd2s;
-
-				set = ooo_cpu[cpu].L1D.get_set(pd2s >> LOG2_BLOCK_SIZE);
-				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
-
-				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pd2s, 2);
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][0]++;
-					if(!magic){
-						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, type, type, 1);
-						ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
-					}
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-				}
-				else{
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-
-					if(!magic && PTW_START_LEVEL == 1){
-						way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, pd2s, type);
-
-						ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
-						ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, pd2s, ip, ooo_cpu[cpu].L1D.block[set][way_fill].full_addr, type, 0);
-
-						if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0)
-							ooo_cpu[cpu].L1D.block[set][way_fill].valid = 1;
-
-						ooo_cpu[cpu].L1D.block[set][way_fill].dirty = 0;
-						ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
-						ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
-
-						ooo_cpu[cpu].L1D.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pd2s;
-						ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pd2s, 2, false);
-						ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
-						ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
-					}
-
-					set = ooo_cpu[cpu].L2C.get_set(pd2s >> LOG2_BLOCK_SIZE);
-					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
-					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pd2s, 2);
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][1]++;
-						if(!magic){
-							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, type, type, 1);
-							ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
-						}
-						cstall+=L2C_LATENCY;
-					}
-					else{
-						cstall += L2C_LATENCY;
-
-						if(!magic){
-							way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, pd2s, type);
-
-							ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
-							ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, pd2s, ip, ooo_cpu[cpu].L2C.block[set][way_fill].full_addr, type, 0);
-
-							if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0)
-								ooo_cpu[cpu].L2C.block[set][way_fill].valid = 1;
-
-							ooo_cpu[cpu].L2C.block[set][way_fill].dirty = 0;
-							ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
-							ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
-
-							ooo_cpu[cpu].L2C.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pd2s;
-							ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pd2s, 2, false);
-							ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
-							ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
-						}
-
-						set = uncore.LLC.get_set(pd2s >> LOG2_BLOCK_SIZE);
-						way_read = uncore.LLC.check_hit(&search_packet);
-						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pd2s, 2);
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][2]++;
-							if(!magic){
-								uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
-								uncore.LLC.block[set][way_read].used = 1;
-							}
-							cstall += LLC_LATENCY;
-						}
-						else{
-							cstall += LLC_LATENCY;
-
-							if(!magic){
-								way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, pd2s, type);
-
-								uncore.LLC.record_footprint_on_eviction(set, way_fill);
-								uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, pd2s, ip, uncore.LLC.block[set][way_fill].full_addr, type, 0);
-
-								if (uncore.LLC.block[set][way_fill].valid == 0)
-									uncore.LLC.block[set][way_fill].valid = 1;
-
-								uncore.LLC.block[set][way_fill].dirty = 0;
-								uncore.LLC.block[set][way_fill].prefetch = 0;
-								uncore.LLC.block[set][way_fill].used = 0;
-
-								uncore.LLC.block[set][way_fill].tag = pd2s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].address = pd2s >> LOG2_BLOCK_SIZE;
-								uncore.LLC.block[set][way_fill].full_addr = pd2s;
-								uncore.LLC.mark_translation_access(set, way_fill, pd2s, 2, false);
-								uncore.LLC.block[set][way_fill].data = 55;
-								uncore.LLC.block[set][way_fill].cpu = cpu;
-							}
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][3]++;
-							issue_ptw_dram_read(cpu, pd2s, instr_id, ip, type, 2);
-							cstall += 200;
-						}
-					}
-				}
-				if(debug)
-					cout << "STALL_pd: " << cstall << endl;
-			}
-		}
-
-		if(0 == 0 && ideal!=1){
-			if(debug)
-				cout << "PT MISS" << endl;
-
-			search_packet.address = pt2s >> LOG2_BLOCK_SIZE;
-			search_packet.full_addr = pt2s;
-
-			set = ooo_cpu[cpu].L1D.get_set(pt2s >> LOG2_BLOCK_SIZE);
-			way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
-
-			if(way_read >=0){
-				search_packet.hit_where = 1; // L1D hit
-				ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pt2s, 3);
-				ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][0]++;
-				if(!magic){
-					ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, type, type, 1);
-					ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
-				}
-				cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-			}
-			else{
-				cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-
-				if(!magic){
-					way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, pt2s, type);
-
-					ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
-					ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, pt2s, ip, ooo_cpu[cpu].L1D.block[set][way_fill].full_addr, type, 0);
-
-					if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0)
-						ooo_cpu[cpu].L1D.block[set][way_fill].valid = 1;
-
-					ooo_cpu[cpu].L1D.block[set][way_fill].dirty = 0;
-					ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
-					ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
-
-					ooo_cpu[cpu].L1D.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
-					ooo_cpu[cpu].L1D.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
-					ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = pt2s;
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, pt2s, 3, false);
-					ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
-					ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
-				}
-
-				set = ooo_cpu[cpu].L2C.get_set(pt2s >> LOG2_BLOCK_SIZE);
-				way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
-				if(way_read >=0){
-					search_packet.hit_where = 2; // L2C hit
-					ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pt2s, 3);
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][1]++;
-					if(!magic){
-						ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L2C.block[set][way_read].full_addr, ip, type, type, 1);
-						ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
-					}
-					cstall+=L2C_LATENCY;
-				}
-				else{
-					cstall += L2C_LATENCY;
-
-					if(!magic){
-						way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, pt2s, type);
-
-						ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
-						ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, pt2s, ip, ooo_cpu[cpu].L2C.block[set][way_fill].full_addr, type, 0);
-
-						if (ooo_cpu[cpu].L2C.block[set][way_fill].valid == 0)
-							ooo_cpu[cpu].L2C.block[set][way_fill].valid = 1;
-
-						ooo_cpu[cpu].L2C.block[set][way_fill].dirty = 0;
-						ooo_cpu[cpu].L2C.block[set][way_fill].prefetch = 0;
-						ooo_cpu[cpu].L2C.block[set][way_fill].used = 0;
-
-						ooo_cpu[cpu].L2C.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L2C.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
-						ooo_cpu[cpu].L2C.block[set][way_fill].full_addr = pt2s;
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_fill, pt2s, 3, false);
-						ooo_cpu[cpu].L2C.block[set][way_fill].data = 55;
-						ooo_cpu[cpu].L2C.block[set][way_fill].cpu = cpu;
-					}
-
-					set = uncore.LLC.get_set(pt2s >> LOG2_BLOCK_SIZE);
-					way_read = uncore.LLC.check_hit(&search_packet);
-					if(way_read >=0){
-						search_packet.hit_where = 3; // LLC hit
-						uncore.LLC.mark_translation_access(set, way_read, pt2s, 3);
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][2]++;
-						if(!magic){
-							uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
-							uncore.LLC.block[set][way_read].used = 1;
-						}
-						cstall += LLC_LATENCY;
-					}
-					else{
-						search_packet.hit_where = 4; // DRAM hit / LLC fill
-						cstall += LLC_LATENCY;
-
-						if(!magic){
-							way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, pt2s, type);
-
-							uncore.LLC.record_footprint_on_eviction(set, way_fill);
-							uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, pt2s, ip, uncore.LLC.block[set][way_fill].full_addr, type, 0);
-
-							if (uncore.LLC.block[set][way_fill].valid == 0)
-								uncore.LLC.block[set][way_fill].valid = 1;
-
-							uncore.LLC.block[set][way_fill].dirty = 0;
-							uncore.LLC.block[set][way_fill].prefetch = 0;
-							uncore.LLC.block[set][way_fill].used = 0;
-
-							uncore.LLC.block[set][way_fill].tag = pt2s >> LOG2_BLOCK_SIZE;
-							uncore.LLC.block[set][way_fill].address = pt2s >> LOG2_BLOCK_SIZE;
-							uncore.LLC.block[set][way_fill].full_addr = pt2s;
-							uncore.LLC.mark_translation_access(set, way_fill, pt2s, 3, false);
-							uncore.LLC.block[set][way_fill].data = 55;
-							uncore.LLC.block[set][way_fill].cpu = cpu;
-						}
-
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][3]++;
-						issue_ptw_dram_read(cpu, pt2s, instr_id, ip, type, 3);
-						cstall += 200;
 					}
 				}
 			}
 		}
-
 		if (PAGE_TABLE_LATENCY != 0){
 			if(magic != 2 && ideal != 1)
 				stall_cycle[cpu] = current_core_cycle[cpu] + cstall;
@@ -1484,6 +1095,11 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 
 	int mmu_hit[3] = {0,0,0};
 	uint64_t compare_pml4, compare_pdp, compare_pd;
+	uint64_t ptes_per_page = PAGE_SIZE / 8;
+	uint64_t log2_ptes = lg2(ptes_per_page);
+	compare_pml4 = vpage >> (3 * log2_ptes);
+	compare_pdp  = vpage >> (2 * log2_ptes);
+	compare_pd   = vpage >> (1 * log2_ptes);
 
 	uint64_t cstall = 2;
 	ooo_cpu[cpu].STLB.mmu_timer++;
@@ -1511,235 +1127,86 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 			ooo_cpu[cpu].STLB.lru_pd(ooo_cpu[cpu].STLB.mmu_timer, compare_pd);
 
 		uint64_t cr3 = 0x200000;
+		uint64_t ptes_per_page = PAGE_SIZE / 8;
+		uint64_t log2_ptes = lg2(ptes_per_page);
+		uint64_t pte_mask = ptes_per_page - 1;
+		int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
 
-		uint64_t pt_index, pd_index, pdp_index, pml4_index;
-
-		if(LOG2_PAGE_SIZE == 12){
-			pt_index   = (vpage & 0x00000000001ff);
-			pd_index   = ((vpage>>9) & 0x00000000001ff);
-			pdp_index  = ((vpage>>18) & 0x00000000001ff);
-			pml4_index = ((vpage>>27) & 0x00000000001ff);
-		}
-		else{
-			pt_index   = (vpage & 0x00000000001ff);
-			pdp_index  = ((vpage>>9) & 0x00000000001ff);
-			pml4_index = ((vpage>>18) & 0x00000000001ff);
-		}
-
-		uint64_t pml42s, pdp2s, pd2s, pt2s;
-
-		if(LOG2_PAGE_SIZE == 12){
-			pml42s = cr3 + pml4_index * 8;
-
-			pdp2s  = cr3 + 512 * 8 \
-				 + pml4_index * 512 * 8 \
-				 + pdp_index * 8;
-
-			pd2s = cr3 + 512 * 8 \
-			       + 512 * 512 * 8 \
-			       + pml4_index * 512 * 512 * 8 \
-			       + pdp_index * 512 * 8 \
-			       + pd_index * 8;
-
-			pt2s = cr3 + 512 * 8 \
-			       + 512 * 512 * 8 \
-			       + 512 * 512 * 512 * 8 \
-			       + pml4_index * 512 * 512 * 512 * 8 \
-			       + pdp_index * 512 * 512 * 8 \
-			       + pd_index * 512 * 8\
-			       + pt_index * 8;
-		}
-		else{
-			pml42s = cr3 + pml4_index * 8;
-
-			pdp2s  = cr3 + 512 * 8 \
-				 + pml4_index * 512 * 8 \
-				 + pdp_index * 8;
-
-			pt2s = cr3 + 512 * 8 \
-			       + 512 * 512 * 8 \
-			       + pml4_index * 512 * 512 * 8 \
-			       + pdp_index * 512 * 8 \
-			       + pt_index * 8;
+		uint64_t level_addrs[10];
+		for (int i = 0; i < walk_depth; i++) {
+			uint64_t offset = 0;
+			for (int j = i + 1; j < walk_depth; j++) {
+				uint64_t multiplier = 1;
+				for (int k = 0; k < walk_depth - j; k++) multiplier *= ptes_per_page;
+				offset += multiplier * 8;
+			}
+			uint64_t index_offset = 0;
+			for (int j = i; j < walk_depth; j++) {
+				uint64_t idx = (vpage >> (j * log2_ptes)) & pte_mask;
+				uint64_t multiplier = 1;
+				for (int k = 0; k < j - i; k++) multiplier *= ptes_per_page;
+				index_offset += idx * multiplier * 8;
+			}
+			level_addrs[i] = cr3 + offset + index_offset;
 		}
 
-		uint32_t set, way_fill;
+		cstall = 2;
+		uint32_t set;
 		int way_read;
+		PACKET search_packet;
 
-		int debug = 0;
+		for (int lvl = walk_depth - 1; lvl >= 0; --lvl) {
+			int mapped_mmu_idx = (walk_depth > 3 && lvl >= 1 && lvl <= 3) ? (3 - lvl) : -1;
+			if (walk_depth == 3 && lvl >= 1 && lvl <= 2) mapped_mmu_idx = 2 - lvl;
+			
+			bool hit = false;
+			if (mapped_mmu_idx >= 0 && mapped_mmu_idx < 3) {
+				hit = mmu_hit[mapped_mmu_idx];
+			}
+			if (walk_depth > 4 && lvl >= 4) hit = false;
 
-		if(debug)
-			cout << "\nNEW PAGE WALK " << endl;
-		int asap = 0;
-		if(!asap){
-			if(mmu_hit[0] == 0){
-				PACKET search_packet;
-				search_packet.address = pml42s >> LOG2_BLOCK_SIZE;
-				search_packet.full_addr = pml42s;
+			int stat_idx = 3 - lvl;
+			if (stat_idx < 0) stat_idx = 0;
+			if (stat_idx > 3) stat_idx = 3;
 
-				set = ooo_cpu[cpu].L1D.get_set(pml42s >> LOG2_BLOCK_SIZE);
+			if (!hit) {
+				uint64_t addr = level_addrs[lvl];
+				search_packet.address = addr >> LOG2_BLOCK_SIZE;
+				search_packet.full_addr = addr;
+
+				set = ooo_cpu[cpu].L1D.get_set(addr >> LOG2_BLOCK_SIZE);
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
-				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pml42s, 0);
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][0]++;
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-				}
-				else{
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
 
-					set = ooo_cpu[cpu].L2C.get_set(pml42s >> LOG2_BLOCK_SIZE);
+				if (way_read >= 0) {
+					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, addr, stat_idx);
+					if (lvl != 0 || iflag) ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][0]++;
+					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
+				} else {
+					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
+					
+					set = ooo_cpu[cpu].L2C.get_set(addr >> LOG2_BLOCK_SIZE);
 					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
-					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pml42s, 0);
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][1]++;
+
+					if (way_read >= 0) {
+						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, addr, stat_idx);
+						if (lvl != 0 || iflag) ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][1]++;
 						cstall += L2C_LATENCY;
-					}
-					else{
+					} else {
 						cstall += L2C_LATENCY;
 
-						set = uncore.LLC.get_set(pml42s >> LOG2_BLOCK_SIZE);
+						set = uncore.LLC.get_set(addr >> LOG2_BLOCK_SIZE);
 						way_read = uncore.LLC.check_hit(&search_packet);
-						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pml42s, 0);
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][2]++;
-							cstall += LLC_LATENCY;
-						}
-						else{
-							cstall += LLC_LATENCY;
 
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[0][3]++;
-							issue_ptw_dram_read(cpu, pml42s, 0, ip, 0, 0);
+						if (way_read >= 0) {
+							uncore.LLC.mark_translation_access(set, way_read, addr, stat_idx);
+							if (lvl != 0 || iflag) ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][2]++;
+							cstall += LLC_LATENCY;
+						} else {
+							cstall += LLC_LATENCY;
 							cstall += 200;
+							if (lvl != 0 || iflag) ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][3]++;
+							issue_ptw_dram_read(cpu, addr, 0, ip, 0, stat_idx);
 						}
-					}
-				}
-			}
-
-			if(mmu_hit[1] == 0){
-				PACKET search_packet;
-				search_packet.address = pdp2s >> LOG2_BLOCK_SIZE;
-				search_packet.full_addr = pdp2s;
-
-				set = ooo_cpu[cpu].L1D.get_set(pdp2s >> LOG2_BLOCK_SIZE);
-				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
-				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pdp2s, 1);
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][0]++;
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-				}
-				else{
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-					set = ooo_cpu[cpu].L2C.get_set(pdp2s >> LOG2_BLOCK_SIZE);
-					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
-					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pdp2s, 1);
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][1]++;
-						cstall+=L2C_LATENCY;
-					}
-					else{
-						cstall += L2C_LATENCY;
-
-						set = uncore.LLC.get_set(pdp2s >> LOG2_BLOCK_SIZE);
-						way_read = uncore.LLC.check_hit(&search_packet);
-						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pdp2s, 1);
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][2]++;
-							cstall += LLC_LATENCY;
-						}
-						else{
-							cstall += LLC_LATENCY;
-
-							cstall += 200;
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[1][3]++;
-							issue_ptw_dram_read(cpu, pdp2s, 0, ip, 0, 1);
-						}
-					}
-				}
-			}
-
-			if((mmu_hit[2] == 0) && (LOG2_PAGE_SIZE==12)){
-				PACKET search_packet;
-				search_packet.address = pd2s >> LOG2_BLOCK_SIZE;
-				search_packet.full_addr = pd2s;
-
-				set = ooo_cpu[cpu].L1D.get_set(pd2s >> LOG2_BLOCK_SIZE);
-				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
-				if(way_read >=0){
-					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pd2s, 2);
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][0]++;
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-				}
-				else{
-					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-
-					set = ooo_cpu[cpu].L2C.get_set(pd2s >> LOG2_BLOCK_SIZE);
-					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
-					if(way_read >=0){
-						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pd2s, 2);
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][1]++;
-						cstall+=L2C_LATENCY;
-					}
-					else{
-						cstall += L2C_LATENCY;
-
-						set = uncore.LLC.get_set(pd2s >> LOG2_BLOCK_SIZE);
-						way_read = uncore.LLC.check_hit(&search_packet);
-						if(way_read >=0){
-							uncore.LLC.mark_translation_access(set, way_read, pd2s, 2);
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][2]++;
-							cstall += LLC_LATENCY;
-						}
-						else{
-							cstall += LLC_LATENCY;
-
-							cstall += 200;
-							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[2][3]++;
-							issue_ptw_dram_read(cpu, pd2s, 0, ip, 0, 2);
-						}
-					}
-				}
-			}
-		}
-		if(0 == 0){
-			PACKET search_packet;
-			search_packet.address = pt2s >> LOG2_BLOCK_SIZE;
-			search_packet.full_addr = pt2s;
-
-			set = ooo_cpu[cpu].L1D.get_set(pt2s >> LOG2_BLOCK_SIZE);
-			way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
-			if(way_read >=0){
-				ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, pt2s, 3);
-				if (iflag) {
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][0]++;
-				}
-				cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-			}
-			else{
-				cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
-
-				set = ooo_cpu[cpu].L2C.get_set(pt2s >> LOG2_BLOCK_SIZE);
-				way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
-				if(way_read >=0){
-					ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, pt2s, 3);
-					ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][1]++;
-					cstall+=L2C_LATENCY;
-				}
-				else{
-					cstall += L2C_LATENCY;
-
-					set = uncore.LLC.get_set(pt2s >> LOG2_BLOCK_SIZE);
-					way_read = uncore.LLC.check_hit(&search_packet);
-					if(way_read >=0){
-						uncore.LLC.mark_translation_access(set, way_read, pt2s, 3);
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][2]++;
-						cstall += LLC_LATENCY;
-					}
-					else{
-						cstall += LLC_LATENCY;
-
-						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[3][3]++;
-						issue_ptw_dram_read(cpu, pt2s, 0, ip, 0, 3);
-						cstall += 200;
 					}
 				}
 			}
@@ -1790,12 +1257,13 @@ int main(int argc, char** argv)
 			{"traces",  no_argument, 0, 't'},
 			{"stlb_mode", required_argument, 0, 'S'},
 			{"flush_on_end", required_argument, 0, 'F'},
+			{"page_size", required_argument, 0, 'p'},
 			{0, 0, 0, 0}      
 		};
 
 		int option_index = 0;
 
-		c = getopt_long_only(argc, argv, "wihsb", long_options, &option_index);
+		c = getopt_long_only(argc, argv, "wihsbp", long_options, &option_index);
 
 		// no more option characters
 		if (c == -1)
@@ -1838,6 +1306,7 @@ int main(int argc, char** argv)
 			case 'F':
 				knob_flush_on_end = atoi(optarg);
 				break;
+
 			default:
 				abort();
 		}

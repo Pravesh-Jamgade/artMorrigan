@@ -150,12 +150,21 @@ def generate_config_header(c: configparser.ConfigParser, config_path: Path) -> N
 def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
     generate_config_header(c, config_path)
     get = lambda section, key: value(c, section, key)
-    page_sizes = {"4kb": ("4096", "12"), "2mb": ("2097152", "21")}
-    page_size = get("simulator", "page_size").lower()
-    if page_size not in page_sizes:
-        raise ValueError("simulator.page_size must be 4kb or 2mb")
-    replace_define("inc/champsim.h", "PAGE_SIZE", page_sizes[page_size][0])
-    replace_define("inc/champsim.h", "LOG2_PAGE_SIZE", page_sizes[page_size][1])
+    page_size_str = get("simulator", "page_size").lower()
+    if page_size_str.endswith("kb"):
+        page_size_val = int(page_size_str[:-2]) * 1024
+    elif page_size_str.endswith("mb"):
+        page_size_val = int(page_size_str[:-2]) * 1024 * 1024
+    elif page_size_str.endswith("b"):
+        page_size_val = int(page_size_str[:-1])
+    else:
+        page_size_val = int(page_size_str)
+        
+    import math
+    log2_page_size = int(math.log2(page_size_val))
+    
+    replace_define("inc/champsim.h", "PAGE_SIZE", str(page_size_val))
+    replace_define("inc/champsim.h", "LOG2_PAGE_SIZE", str(log2_page_size))
 
     stlb_modes = {
         "analysis": "STLB_BLOCK_ANALYSIS",
