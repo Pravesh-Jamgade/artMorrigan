@@ -1616,7 +1616,10 @@ void CACHE::handle_fill()
 					for (uint32_t s = 0; s < STLB_PTES_PER_BLOCK; ++s) {
 						if ((entry.valid_mask & (1u << s)) && entry.entry_offset_in_block[s] == offset) {
 							if (entry.prefilled_mask & (1u << s)) {
-								stlb_prefilled_ptes_hit++;
+								if (stlb_block_mode == STLB_BLOCK_ANALYSIS)
+									shadow_stlb_prefilled_ptes_hit++;
+								else
+									stlb_prefilled_ptes_hit++;
 								entry.prefilled_mask &= ~(1u << s);
 							}
 							entry.accessed_mask |= 1u << s;
@@ -1959,7 +1962,10 @@ void CACHE::handle_fill()
 				entry.entry_offset_in_block[sector_slot] = offset;
 				entry.valid_mask |= 1u << sector_slot;
 				entry.prefilled_mask |= 1u << sector_slot;
-				stlb_prefilled_ptes_total++;
+				if (stlb_block_mode == STLB_BLOCK_ANALYSIS)
+					shadow_stlb_prefilled_ptes_total++;
+				else
+					stlb_prefilled_ptes_total++;
 				if (offset == req_offset) {
 					entry.accessed_mask |= 1u << sector_slot;
 				}
@@ -2060,8 +2066,13 @@ void CACHE::handle_fill()
 	void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 	{
 		record_footprint_on_eviction(set, way);
-		if (cache_type == IS_STLB)
+		if (cache_type == IS_STLB) {
 			stlb_block_fill(packet->cpu, packet->address, packet->full_addr, packet->hit_where);
+			
+			// If we are not in analysis mode, the stlb_block handles everything.
+			if (stlb_block_mode != STLB_BLOCK_ANALYSIS)
+				return;
+		}
 
 #ifdef SANITY_CHECK
 		if (cache_type == IS_ITLB) {

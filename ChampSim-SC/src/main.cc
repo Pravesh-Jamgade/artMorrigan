@@ -140,9 +140,9 @@ void write_csv_stats()
 			write_csv_scalar(csv, prefix + "STLB_detail_prefilled_accuracy_percent", detail_prefilled_accuracy);
 		}
 		if (stlb_block_mode == STLB_BLOCK_ANALYSIS) {
-			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_ptes_total", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
-			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_ptes_hit", ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit);
-			double shadow_prefilled_accuracy = (ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.stlb_prefilled_ptes_hit / ooo_cpu[cpu].STLB.stlb_prefilled_ptes_total);
+			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_ptes_total", ooo_cpu[cpu].STLB.shadow_stlb_prefilled_ptes_total);
+			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_ptes_hit", ooo_cpu[cpu].STLB.shadow_stlb_prefilled_ptes_hit);
+			double shadow_prefilled_accuracy = (ooo_cpu[cpu].STLB.shadow_stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.shadow_stlb_prefilled_ptes_hit / ooo_cpu[cpu].STLB.shadow_stlb_prefilled_ptes_total);
 			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_accuracy_percent", shadow_prefilled_accuracy);
 		}
 
@@ -331,9 +331,9 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 			cout << "STLB DETAIL PREFILLED HIT ACCURACY: " << detail_prefilled_acc << "%" << endl;
 		}
 		if (stlb_block_mode == STLB_BLOCK_ANALYSIS) {
-			cout << "SHADOW STLB PREFILLED PTES TOTAL: " << cache->stlb_prefilled_ptes_total << endl;
-			cout << "SHADOW STLB PREFILLED PTES HIT: " << cache->stlb_prefilled_ptes_hit << endl;
-			double shadow_prefilled_acc = (cache->stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->stlb_prefilled_ptes_hit / cache->stlb_prefilled_ptes_total);
+			cout << "SHADOW STLB PREFILLED PTES TOTAL: " << cache->shadow_stlb_prefilled_ptes_total << endl;
+			cout << "SHADOW STLB PREFILLED PTES HIT: " << cache->shadow_stlb_prefilled_ptes_hit << endl;
+			double shadow_prefilled_acc = (cache->shadow_stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->shadow_stlb_prefilled_ptes_hit / cache->shadow_stlb_prefilled_ptes_total);
 			cout << "SHADOW STLB PREFILLED HIT ACCURACY: " << shadow_prefilled_acc << "%" << endl;
 		}
 	}
@@ -511,6 +511,18 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->stlb_block_hits = 0;
 		cache->stlb_block_misses = 0;
 		cache->stlb_block_evictions = 0;
+		cache->stlb_sparsity_cross_subblock_count = 0;
+		for (int i = 0; i < 5; ++i) cache->stlb_sparsity_hit_where[i] = 0;
+		cache->stlb_sparsity_existing_way_count = 0;
+		cache->stlb_sparsity_invalid_way_count = 0;
+		cache->stlb_sparsity_lru_way_count = 0;
+		cache->stlb_sparsity_random_pte_evictions = 0;
+		cache->stlb_sparsity_prefilled_ptes_total = 0;
+		cache->stlb_sparsity_prefilled_ptes_hit = 0;
+		cache->stlb_prefilled_ptes_total = 0;
+		cache->stlb_prefilled_ptes_hit = 0;
+		cache->shadow_stlb_prefilled_ptes_total = 0;
+		cache->shadow_stlb_prefilled_ptes_hit = 0;
 		for (int footprint = 0; footprint < STLB_PTES_PER_BLOCK; ++footprint)
 			cache->stlb_block_footprint[footprint] = 0;
 		for (int i = 0; i <= STLB_PTES_PER_BLOCK; ++i) {

@@ -174,6 +174,8 @@ class CACHE : public MEMORY {
 		uint64_t stlb_sparsity_prefilled_ptes_hit;
 		uint64_t stlb_prefilled_ptes_total;
 		uint64_t stlb_prefilled_ptes_hit;
+		uint64_t shadow_stlb_prefilled_ptes_total;
+		uint64_t shadow_stlb_prefilled_ptes_hit;
 		uint64_t translation_valid_entries_on_eviction[9];
 		uint64_t translation_valid_footprint_matrix[9][9]; // [valid][footprint] (footprint: 0..8)
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
@@ -321,6 +323,8 @@ class CACHE : public MEMORY {
 				stlb_sparsity_prefilled_ptes_hit = 0;
 				stlb_prefilled_ptes_total = 0;
 				stlb_prefilled_ptes_hit = 0;
+				shadow_stlb_prefilled_ptes_total = 0;
+				shadow_stlb_prefilled_ptes_hit = 0;
 				for (int i = 0; i < 9; ++i) {
 					translation_valid_entries_on_eviction[i] = 0;
 					for (int j = 0; j < 9; ++j) translation_valid_footprint_matrix[i][j] = 0;
