@@ -99,6 +99,7 @@ void write_csv_stats()
 		else if (stlb_block_mode == STLB_BLOCK_SPARSITY) stlb_mode_prefix = "STLB_SPARSITY";
 		else if (stlb_block_mode == STLB_BLOCK_DETAIL) stlb_mode_prefix = "STLB_DETAIL";
 		
+		write_csv_vector(csv, prefix + stlb_mode_prefix + "_rrc" + stlb_suffix, rrc_labels, ooo_cpu[cpu].STLB.shadow_stlb_rrc);
 		write_csv_scalar(csv, prefix + stlb_mode_prefix + "_block_footprint_evictions", ooo_cpu[cpu].STLB.stlb_block_evictions);
 		vector<string> stlb_footprint_labels;
 		for (uint32_t ptes = 1; ptes <= STLB_PTES_PER_BLOCK; ++ptes)
@@ -452,6 +453,7 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 	}
 	for (int bucket = 0; bucket < 6; ++bucket) {
 		cache->rrc[bucket] = 0;
+		cache->shadow_stlb_rrc[bucket] = 0;
 		for (int footprint = 0; footprint < 8; ++footprint)
 			cache->translation_rrc_footprint[bucket][footprint] = 0;
 	}

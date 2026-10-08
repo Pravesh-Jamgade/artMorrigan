@@ -183,6 +183,7 @@ class CACHE : public MEMORY {
 		uint64_t footprint[4][8], footprint_evictions[4];
 		// Re-reference counts are bucketed at 1, 2, 4, 8, 16, and 32+.
 		uint64_t rrc[6], translation_rrc_footprint[6][8];
+		uint64_t shadow_stlb_rrc[6];
 		int fill_level;
 		uint32_t MAX_READ, MAX_FILL;
 		uint32_t reads_available_this_cycle;
@@ -331,6 +332,7 @@ class CACHE : public MEMORY {
 				}
 				for (int i = 0; i < 6; ++i) {
 					rrc[i] = 0;
+					shadow_stlb_rrc[i] = 0;
 					for (int j = 0; j < 8; ++j) translation_rrc_footprint[i][j] = 0;
 				}
 

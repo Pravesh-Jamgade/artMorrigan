@@ -1705,8 +1705,6 @@ void CACHE::handle_fill()
 					entry.entry_offset_in_block[target_slot] = req_offset;
 					entry.valid_mask |= (1u << target_slot);
 					entry.accessed_mask |= (1u << target_slot);
-					entry.prefilled_mask |= 1u << target_slot;
-					stlb_sparsity_prefilled_ptes_total++;
 				}
 
 				// Update LRU for existing block
@@ -1845,8 +1843,6 @@ void CACHE::handle_fill()
 				entry.pte[sector_slot] = page_ppns[req_offset];
 				entry.entry_offset_in_block[sector_slot] = req_offset;
 				entry.valid_mask |= 1u << sector_slot;
-				entry.prefilled_mask |= 1u << sector_slot;
-				stlb_sparsity_prefilled_ptes_total++;
 				filled_offsets_mask |= 1u << req_offset;
 				sector_slot++;
 			}
@@ -1961,11 +1957,13 @@ void CACHE::handle_fill()
 				entry.pte[sector_slot] = ppn;
 				entry.entry_offset_in_block[sector_slot] = offset;
 				entry.valid_mask |= 1u << sector_slot;
-				entry.prefilled_mask |= 1u << sector_slot;
-				if (stlb_block_mode == STLB_BLOCK_ANALYSIS)
-					shadow_stlb_prefilled_ptes_total++;
-				else
-					stlb_prefilled_ptes_total++;
+				if (offset != req_offset) {
+					entry.prefilled_mask |= 1u << sector_slot;
+					if (stlb_block_mode == STLB_BLOCK_ANALYSIS)
+						shadow_stlb_prefilled_ptes_total++;
+					else
+						stlb_prefilled_ptes_total++;
+				}
 				if (offset == req_offset) {
 					entry.accessed_mask |= 1u << sector_slot;
 				}
@@ -2048,7 +2046,7 @@ void CACHE::handle_fill()
 
 		if (entry.rereference_count) {
 			const uint32_t bucket = rrc_bucket(entry.rereference_count);
-			rrc[bucket]++;
+			shadow_stlb_rrc[bucket]++;
 		}
 		entry.rereference_count = 0;
 	}
@@ -2100,11 +2098,6 @@ void CACHE::handle_fill()
 			block[set][way].valid = 1;
 		block[set][way].dirty = 0;
 		block[set][way].prefetch = (packet->type == PREFETCH) ? 1 : 0;
-		block[set][way].stlb_prefilled = 0;
-		if (cache_type == IS_STLB && stlb_block_mode == STLB_BLOCK_ANALYSIS) {
-			block[set][way].stlb_prefilled = 1;
-			stlb_prefilled_ptes_total++;
-		}
 		block[set][way].used = 0;
 		block[set][way].ptw_level = UINT8_MAX;
 		block[set][way].translation_footprint = 0;
@@ -2185,13 +2178,6 @@ void CACHE::handle_fill()
 			if (block[set][way].valid && (block[set][way].tag == packet->address)) {
 
 				match_way = way;
-				if (cache_type == IS_STLB && stlb_block_mode == STLB_BLOCK_ANALYSIS) {
-					if (block[set][way].stlb_prefilled) {
-						stlb_prefilled_ptes_hit++;
-						block[set][way].stlb_prefilled = 0;
-					}
-				}
-
 				DP ( if (warmup_complete[packet->cpu]) {
 						cout << "[" << NAME << "] " << __func__ << " instr_id: " << packet->instr_id << " type: " << +packet->type << hex << " addr: " << packet->address;
 						cout << " full_addr: " << packet->full_addr << " tag: " << block[set][way].tag << " data: " << block[set][way].data << dec;
