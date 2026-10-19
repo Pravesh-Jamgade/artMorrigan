@@ -139,6 +139,9 @@ bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 
 class CACHE : public MEMORY {
 	public:
+
+		CollectStats collect_stats;
+
 		// STLB block entry supporting standard (consecutive) and sparse (footprint-driven) modes
 		struct STLB_BLOCK_ENTRY {
 			uint64_t tag, pte[STLB_PTES_PER_BLOCK];

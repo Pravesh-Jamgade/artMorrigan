@@ -32,6 +32,7 @@ extern uint32_t DRAM_MTPS, DRAM_DBUS_RETURN_TIME;
 class MEMORY_CONTROLLER : public MEMORY {
   public:
     const string NAME;
+    CollectStats collect_stats;
 
     DRAM_ARRAY dram_array[DRAM_CHANNELS][DRAM_RANKS][DRAM_BANKS];
     uint64_t dbus_cycle_available[DRAM_CHANNELS], dbus_cycle_congested[DRAM_CHANNELS], dbus_congested[NUM_TYPES+1][NUM_TYPES+1];
@@ -44,6 +45,9 @@ class MEMORY_CONTROLLER : public MEMORY {
 
     // queues
     PACKET_QUEUE WQ[DRAM_CHANNELS], RQ[DRAM_CHANNELS];
+
+	map<uint64_t, LineHistory> line_history;
+    int reuse_distance_histogram[32] = {0}; // 0-31, 32+ is ignored
 
     // constructor
     MEMORY_CONTROLLER(string v1) : NAME (v1) {

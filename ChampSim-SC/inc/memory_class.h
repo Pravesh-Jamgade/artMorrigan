@@ -17,6 +17,23 @@ extern uint32_t tRP,  // Row Precharge (RP) latency
 
 extern uint64_t l2pf_access;
 
+// Rtn using it for leaf translation blocks
+struct LineHistory {
+    uint8_t used_footprint;
+    int same_offset_touched;
+    int diff_offset_touched;
+    int reuse_count;
+    long long int last_cache_access_count;
+    LineHistory() : used_footprint(0), same_offset_touched(0), diff_offset_touched(0), last_cache_access_count(-1),
+                    reuse_count(0) {}
+};
+
+struct CollectStats{
+    long long int current_access_number = 0;
+    int hist_reuse_distance[32] = {0}; // 0-31, 32+ is ignored
+    map<uint64_t, LineHistory> line_history;
+};
+
 class MEMORY {
   public:
     // memory interface
