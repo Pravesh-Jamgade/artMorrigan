@@ -3,6 +3,7 @@
 
 #include "memory_class.h"
 #include <map>
+#include <unordered_set>
 #include <iterator>
 
 class UNCORE;
@@ -13,8 +14,14 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
 enum STLB_BLOCK_MODE { STLB_BLOCK_ANALYSIS, STLB_BLOCK_DETAIL, STLB_BLOCK_SPARSITY };
 #define DEFAULT_STLB_BLOCK_MODE STLB_BLOCK_ANALYSIS
+enum PTW_BOUND_MODE { PTW_BOUND_NONE, PTW_BOUND_DRAM, PTW_BOUND_LLC };
+enum PTW_LATENCY_MODE { PTW_LATENCY_NONE, PTW_LATENCY_STLB, PTW_LATENCY_L2, PTW_LATENCY_L2_LLC };
+#define DEFAULT_PTW_BOUND_MODE PTW_BOUND_NONE
+#define DEFAULT_PTW_LATENCY_MODE PTW_LATENCY_L2
 #define FLUSH_ON_END 1
 extern STLB_BLOCK_MODE stlb_block_mode;
+extern PTW_BOUND_MODE ptw_bound_mode;
+extern PTW_LATENCY_MODE ptw_latency_mode;
 bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
 
 #define P2TLB 0
@@ -179,6 +186,15 @@ class CACHE : public MEMORY {
 		uint64_t stlb_prefilled_ptes_hit;
 		uint64_t shadow_stlb_prefilled_ptes_total;
 		uint64_t shadow_stlb_prefilled_ptes_hit;
+		std::unordered_set<uint64_t> vpn_history;
+		uint64_t stlb_compulsory_misses;
+		uint64_t stlb_non_compulsory_misses;
+		uint64_t stlb_non_compulsory_leaf_l2_hits;
+		uint64_t stlb_non_compulsory_leaf_llc_hits;
+		uint64_t stlb_non_compulsory_leaf_dram_hits;
+		uint64_t stlb_non_compulsory_tracked;
+		uint64_t stlb_non_compulsory_tracked_dram_bound;
+		uint64_t stlb_non_compulsory_tracked_llc_bound;
 		uint64_t translation_valid_entries_on_eviction[9];
 		uint64_t translation_valid_footprint_matrix[9][9]; // [valid][footprint] (footprint: 0..8)
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
@@ -329,6 +345,14 @@ class CACHE : public MEMORY {
 				stlb_prefilled_ptes_hit = 0;
 				shadow_stlb_prefilled_ptes_total = 0;
 				shadow_stlb_prefilled_ptes_hit = 0;
+				stlb_compulsory_misses = 0;
+				stlb_non_compulsory_misses = 0;
+				stlb_non_compulsory_leaf_l2_hits = 0;
+				stlb_non_compulsory_leaf_llc_hits = 0;
+				stlb_non_compulsory_leaf_dram_hits = 0;
+				stlb_non_compulsory_tracked = 0;
+				stlb_non_compulsory_tracked_dram_bound = 0;
+				stlb_non_compulsory_tracked_llc_bound = 0;
 				for (int i = 0; i < 9; ++i) {
 					translation_valid_entries_on_eviction[i] = 0;
 					for (int j = 0; j < 9; ++j) translation_valid_footprint_matrix[i][j] = 0;

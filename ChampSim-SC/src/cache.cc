@@ -819,6 +819,7 @@ void CACHE::handle_fill()
 							PROCESSED.add_queue(&RQ.entry[index]);
 					}
 					else if (cache_type == IS_STLB){
+						vpn_history.insert(RQ.entry[index].address);
 						if (stlb_block_mode != STLB_BLOCK_DETAIL && stlb_block_mode != STLB_BLOCK_SPARSITY)
 							RQ.entry[index].data = block[set][way].data;
 
@@ -1050,6 +1051,7 @@ void CACHE::handle_fill()
 
 									}
 
+									vpn_history.insert(current_vpn);
 									RQ.entry[index].data = pa >> LOG2_PAGE_SIZE; 
 									RQ.entry[index].event_cycle = current_core_cycle[read_cpu];
 									return_data(&RQ.entry[index]);

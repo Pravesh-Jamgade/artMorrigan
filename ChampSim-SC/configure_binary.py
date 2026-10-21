@@ -28,6 +28,11 @@ LEGACY_OPTIONS = {
     "--stlb_lat": "simulator.stlb_latency", "-stlblat": "simulator.stlb_latency",
     "--stlb_mode": "simulator.stlb_mode",
     "--stlb_ptes": "simulator.stlb_ptes_per_block",
+    "--bound": "simulator.bound",
+    "--ptw_bound": "simulator.bound",
+    "--latency": "simulator.latency",
+    "--latency_mode": "simulator.latency",
+    "--ptw_latency": "simulator.latency",
     "--ptw_start_level": "simulator.ptw_start_level",
     "--flush_on_end": "simulator.flush_on_end",
     "--asap": "simulator.asap", "-asap": "simulator.asap",
@@ -95,8 +100,12 @@ def load_config(selected: Path, overrides: dict[str, str]) -> configparser.Confi
     if missing:
         raise ValueError(f"configuration file not found: {', '.join(missing)}")
     config.read(files)
+    if config.has_option("simulator", "latency_mode"):
+        config.set("simulator", "latency", config.get("simulator", "latency_mode"))
     for dotted, value in overrides.items():
         section, key = dotted.split(".", 1)
+        if section == "simulator" and key == "latency_mode":
+            key = "latency"
         if not config.has_section(section) or not config.has_option(section, key):
             raise ValueError(f"unknown configuration knob: {dotted}")
         config.set(section, key, value)
@@ -180,6 +189,32 @@ def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
     if stlb_ptes not in {"1", "2", "4", "8"}:
         raise ValueError("simulator.stlb_ptes_per_block must be 1, 2, 4, or 8")
     replace_define("inc/cache.h", "STLB_PTES_PER_BLOCK", stlb_ptes)
+
+    bound_modes = {
+        "none": "PTW_BOUND_NONE",
+        "dram": "PTW_BOUND_DRAM",
+        "llc": "PTW_BOUND_LLC",
+    }
+    bound_mode = get("simulator", "bound").lower()
+    if bound_mode not in bound_modes:
+        raise ValueError("simulator.bound must be none, dram, or llc")
+    replace_define("inc/cache.h", "DEFAULT_PTW_BOUND_MODE", bound_modes[bound_mode])
+
+    latency_modes = {
+        "none": "PTW_LATENCY_NONE",
+        "stlb": "PTW_LATENCY_STLB",
+        "l2": "PTW_LATENCY_L2",
+        "l2_llc": "PTW_LATENCY_L2_LLC",
+        "l2+llc": "PTW_LATENCY_L2_LLC",
+    }
+    latency_mode = get("simulator", "latency").lower()
+    if latency_mode not in latency_modes:
+        raise ValueError("simulator.latency must be none, stlb, l2, l2_llc, or l2+llc")
+    if bound_mode == "dram" and latency_mode not in {"stlb", "l2", "l2_llc", "l2+llc"}:
+        raise ValueError("when simulator.bound is dram, simulator.latency must be stlb, l2, l2_llc, or l2+llc")
+    if bound_mode == "llc" and latency_mode not in {"stlb", "l2"}:
+        raise ValueError("when simulator.bound is llc, simulator.latency must be stlb or l2")
+    replace_define("inc/cache.h", "DEFAULT_PTW_LATENCY_MODE", latency_modes[latency_mode])
 
     ptw_start_levels = {"l1": "1", "l2": "2"}
     ptw_start_level = get("simulator", "ptw_start_level").lower()

@@ -146,6 +146,14 @@ void write_csv_stats()
 			double shadow_prefilled_accuracy = (ooo_cpu[cpu].STLB.shadow_stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * ooo_cpu[cpu].STLB.shadow_stlb_prefilled_ptes_hit / ooo_cpu[cpu].STLB.shadow_stlb_prefilled_ptes_total);
 			write_csv_scalar(csv, prefix + "SHADOW_STLB_prefilled_accuracy_percent", shadow_prefilled_accuracy);
 		}
+		write_csv_scalar(csv, prefix + "STLB_compulsory_misses", ooo_cpu[cpu].STLB.stlb_compulsory_misses);
+		write_csv_scalar(csv, prefix + "STLB_non_compulsory_misses", ooo_cpu[cpu].STLB.stlb_non_compulsory_misses);
+		write_csv_scalar(csv, prefix + "STLB_non_compulsory_leaf_l2_hits", ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_l2_hits);
+		write_csv_scalar(csv, prefix + "STLB_non_compulsory_leaf_llc_hits", ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_llc_hits);
+		write_csv_scalar(csv, prefix + "STLB_non_compulsory_leaf_dram_hits", ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_dram_hits);
+		write_csv_scalar(csv, prefix + "STLB_non_compulsory_tracked", ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked);
+		write_csv_scalar(csv, prefix + "STLB_non_compulsory_tracked_dram_bound", ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_dram_bound);
+		write_csv_scalar(csv, prefix + "STLB_non_compulsory_tracked_llc_bound", ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_llc_bound);
 
 		uint64_t ptes_per_page = PAGE_SIZE / 8;
 		uint64_t log2_ptes = lg2(ptes_per_page);
@@ -228,12 +236,130 @@ void write_csv_stats()
 			csv << '\n';
 		}
 	}
+
+	csv << "LLC_reuse_dist_hist, 0, 1, 2-3, 4-7, 8-15, 16-31, 32-63, 64-127, 128-255, 256+\n";
+	cout << "LLC_reuse_dist_hist";
+	int more_than_256 = 0;
+	for(int b=0; b< 32; b++){
+		if(b<9)
+		csv << ", " << uncore.LLC.collect_stats.hist_reuse_distance[b];
+		else if(b>=9) more_than_256 += uncore.LLC.collect_stats.hist_reuse_distance[b];
+	}
+	csv  << ", " << more_than_256 << '\n';
+
+	csv << "DRAM_reuse_dist_hist, 0, 1, 2-3, 4-7, 8-15, 16-31, 32-63, 64-127, 128-255, 256+\n";
+	cout << "DRAM_reuse_dist_hist";
+	more_than_256 = 0;
+	for(int b=0; b< 32; b++){
+		if(b<9)
+		csv << ", " << uncore.DRAM.collect_stats.hist_reuse_distance[b];
+		else if (b>=9) more_than_256 += uncore.DRAM.collect_stats.hist_reuse_distance[b];
+	}
+	csv << ", " << more_than_256 << '\n';
+
+	auto print_offset_hist = [](CollectStats &collect_stats, string obj) {
+		int hist_same_offset[32] = {0}, hist_diff_offset[32] = {0};
+		for(auto &entry : collect_stats.line_history) {
+			int a = entry.second.same_offset_touched;
+			int bucket = -1;
+			while(a > 0){
+				a = a >> 1;
+				bucket++;	
+			}
+			bucket++;
+			hist_same_offset[bucket]++;
+
+			int b = entry.second.diff_offset_touched;
+			bucket = -1;
+			while(b > 0){
+				b = b >> 1;
+				bucket++;	
+			}
+			bucket++;
+			hist_diff_offset[bucket]++;
+		}
+
+		csv <<obj<<"_repitions_or_freqc, 1, 2-3, 4-7, 8-15, 16-31, 32-127, 128-255, 256-511, 512+\n";
+		csv <<obj<<"_same_offset_blocks";
+		int more_than_512 = 0;
+		for(int b=1; b< 32; b++){
+			if(b<9) 
+				csv << ", " << hist_same_offset[b];
+			else if(b>=9)
+				more_than_512 += hist_same_offset[b];
+		}
+		csv << ", " << more_than_512 << '\n';
+
+		csv << obj<<"_diff_offset_blocks";
+		more_than_512 = 0;
+		for(int b=1; b< 32; b++){
+			if(b<9) 
+				csv << ", " << hist_diff_offset[b];
+			else if(b>=9)
+				more_than_512 += hist_diff_offset[b];
+		}
+		csv <<", " << more_than_512 << '\n';
+	};
+
+	print_offset_hist(uncore.LLC.collect_stats, "LLC");
+	print_offset_hist(uncore.DRAM.collect_stats, "DRAM");
+
 	csv << "CSV_STATS_END\n";
+}
+
+void record_line_history(uint64_t pte_address, CollectStats &collect_stats)
+{
+	long long int& current_access_number = collect_stats.current_access_number;
+	auto& line_history = collect_stats.line_history;
+	auto& reuse_bucket = collect_stats.hist_reuse_distance;
+
+	uint64_t cl_addr = pte_address >> LOG2_BLOCK_SIZE;
+	auto found = line_history.find(cl_addr);
+	if (found == line_history.end()) {
+		LineHistory new_history;
+		new_history.used_footprint = 1u << ((pte_address >> 3) & 7);
+		new_history.last_cache_access_count = ++current_access_number;
+		line_history[cl_addr] = new_history;
+	} else {
+		LineHistory &history = found->second;
+		uint8_t new_bit = 1u << ((pte_address >> 3) & 7);
+
+		// if footprint is already used, check if same offset or different offset is touched
+		if(history.used_footprint)
+		{
+			if (history.used_footprint & new_bit)
+				history.same_offset_touched++;
+			else
+				history.diff_offset_touched++;
+		}
+
+		history.used_footprint |= new_bit;
+
+		if(history.last_cache_access_count < 0) {
+			history.last_cache_access_count = ++current_access_number;
+			history.reuse_count++;
+			return;
+		}
+
+		int distance = current_access_number - history.last_cache_access_count;
+		int bucket =-1;
+		while(distance > 0) {
+			distance = distance >> 2;
+			bucket++;
+		}	
+		bucket++;
+		reuse_bucket[bucket]++;
+
+		history.last_cache_access_count = ++current_access_number;
+		history.reuse_count++;
+	}		
 }
 
 // PAGE TABLE
 uint32_t PAGE_TABLE_LATENCY = 0, SWAP_LATENCY = 0;
 STLB_BLOCK_MODE stlb_block_mode = DEFAULT_STLB_BLOCK_MODE;
+PTW_BOUND_MODE ptw_bound_mode = DEFAULT_PTW_BOUND_MODE;
+PTW_LATENCY_MODE ptw_latency_mode = DEFAULT_PTW_LATENCY_MODE;
 queue <uint64_t > page_queue;
 map <uint64_t, uint64_t> page_table, inverse_table, recent_page, unique_cl[NUM_CPUS];
 uint64_t previous_ppage, num_adjacent_page, num_cl[NUM_CPUS], allocated_pages, num_page[NUM_CPUS], minor_fault[NUM_CPUS], major_fault[NUM_CPUS];
@@ -337,6 +463,13 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 			double shadow_prefilled_acc = (cache->shadow_stlb_prefilled_ptes_total == 0) ? 0.0 : (100.0 * cache->shadow_stlb_prefilled_ptes_hit / cache->shadow_stlb_prefilled_ptes_total);
 			cout << "SHADOW STLB PREFILLED HIT ACCURACY: " << shadow_prefilled_acc << "%" << endl;
 		}
+		cout << "STLB COMPULSORY MISSES: " << cache->stlb_compulsory_misses << " NON-COMPULSORY MISSES: " << cache->stlb_non_compulsory_misses << endl;
+		cout << "STLB NON-COMPULSORY LEAF L2 HITS: " << cache->stlb_non_compulsory_leaf_l2_hits
+		     << " LLC HITS (LLC BOUND): " << cache->stlb_non_compulsory_leaf_llc_hits
+		     << " DRAM HITS (DRAM BOUND): " << cache->stlb_non_compulsory_leaf_dram_hits << endl;
+		cout << "STLB NON-COMPULSORY TRACKED TOTAL: " << cache->stlb_non_compulsory_tracked
+		     << " DRAM BOUND TRACKED: " << cache->stlb_non_compulsory_tracked_dram_bound
+		     << " LLC BOUND TRACKED: " << cache->stlb_non_compulsory_tracked_llc_bound << endl;
 	}
 	if (cache->cache_type == IS_L1D || cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
 		cout << cache->NAME << " PT PTE BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;
@@ -427,8 +560,18 @@ void print_dram_stats()
 		cout << " AVG_CONGESTED_CYCLE: -" << endl;
 }
 
+void reset_collect_stats(CollectStats &collect_stats)
+{
+	collect_stats.current_access_number = 0;
+	collect_stats.line_history.clear();
+	for (int i=0; i<32; i++) {
+		collect_stats.hist_reuse_distance[i] = 0;
+	}
+}
+
 void reset_cache_stats(uint32_t cpu, CACHE *cache)
 {
+	reset_collect_stats(cache->collect_stats);
 	for (uint32_t i=0; i<NUM_TYPES; i++) {
 		cache->ACCESS[i] = 0;
 		cache->HIT[i] = 0;
@@ -525,6 +668,14 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->stlb_prefilled_ptes_hit = 0;
 		cache->shadow_stlb_prefilled_ptes_total = 0;
 		cache->shadow_stlb_prefilled_ptes_hit = 0;
+		cache->stlb_compulsory_misses = 0;
+		cache->stlb_non_compulsory_misses = 0;
+		cache->stlb_non_compulsory_leaf_l2_hits = 0;
+		cache->stlb_non_compulsory_leaf_llc_hits = 0;
+		cache->stlb_non_compulsory_leaf_dram_hits = 0;
+		cache->stlb_non_compulsory_tracked = 0;
+		cache->stlb_non_compulsory_tracked_dram_bound = 0;
+		cache->stlb_non_compulsory_tracked_llc_bound = 0;
 		for (int footprint = 0; footprint < STLB_PTES_PER_BLOCK; ++footprint)
 			cache->stlb_block_footprint[footprint] = 0;
 		for (int i = 0; i <= STLB_PTES_PER_BLOCK; ++i) {
@@ -601,6 +752,8 @@ void finish_warmup()
 		uncore.DRAM.WQ[i].ROW_BUFFER_MISS = 0;
 	}
 
+	reset_collect_stats(uncore.DRAM.collect_stats);
+	
 	// set actual cache latency
 	for (uint32_t i=0; i<NUM_CPUS; i++) {
 		ooo_cpu[i].ITLB.LATENCY = ITLB_LATENCY;
@@ -724,6 +877,17 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 	//uint64_t vpage = unique_va >> LOG2_PAGE_SIZE,
 	uint64_t vpage = unique_vpage | high_bit_mask,
 		 voffset = unique_va & ((1<<LOG2_PAGE_SIZE) - 1);
+
+	bool is_non_compulsory = false;
+	if (!magic) {
+		if (ooo_cpu[cpu].STLB.vpn_history.find(unique_vpage) != ooo_cpu[cpu].STLB.vpn_history.end()) {
+			is_non_compulsory = true;
+			ooo_cpu[cpu].STLB.stlb_non_compulsory_misses++;
+		} else {
+			ooo_cpu[cpu].STLB.vpn_history.insert(unique_vpage);
+			ooo_cpu[cpu].STLB.stlb_compulsory_misses++;
+		}
+	}
 
 	// smart random number generator
 	uint64_t random_ppage;
@@ -997,7 +1161,11 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 						way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 
 						if (way_read >= 0) {
-							if (lvl == 0) search_packet.hit_where = 2;
+							if (lvl == 0) {
+								search_packet.hit_where = 2;
+								if (is_non_compulsory)
+									ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_l2_hits++;
+							}
 							ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, addr, stat_idx);
 							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][1]++;
 							if (!magic) {
@@ -1029,17 +1197,40 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 							way_read = uncore.LLC.check_hit(&search_packet);
 
 							if (way_read >= 0) {
-								if (lvl == 0) search_packet.hit_where = 3;
+								if (lvl == 0) 
+								{
+									search_packet.hit_where = 3;
+									record_line_history(addr, uncore.LLC.collect_stats);
+									if (is_non_compulsory)
+										ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_llc_hits++;
+								}
 								uncore.LLC.mark_translation_access(set, way_read, addr, stat_idx);
 								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][2]++;
 								if (!magic) {
 									uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
 									uncore.LLC.block[set][way_read].used = 1;
 								}
-								cstall += LLC_LATENCY;
+								if (lvl == 0 && is_non_compulsory && ptw_bound_mode == PTW_BOUND_LLC) {
+									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked++;
+									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_llc_bound++;
+									if (ptw_latency_mode == PTW_LATENCY_STLB) {
+										cstall = 0; // Only STLB_LATENCY (already paid in STLB RQ)
+									} else if (ptw_latency_mode == PTW_LATENCY_L2) {
+										// Only L2C_LATENCY (already added on L2C miss)
+									} else {
+										cstall += LLC_LATENCY;
+									}
+								} else {
+									cstall += LLC_LATENCY;
+								}
 							} else {
-								if (lvl == 0) search_packet.hit_where = 4;
-								cstall += LLC_LATENCY;
+								if (lvl == 0) 
+								{
+									search_packet.hit_where = 4;
+									record_line_history(addr, uncore.DRAM.collect_stats);
+									if (is_non_compulsory)
+										ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_dram_hits++;
+								}
 
 								if (!magic) {
 									way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, addr, type);
@@ -1060,7 +1251,21 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 
 								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][3]++;
 								issue_ptw_dram_read(cpu, addr, instr_id, ip, type, stat_idx);
-								cstall += 200;
+								if (lvl == 0 && is_non_compulsory && ptw_bound_mode == PTW_BOUND_DRAM) {
+									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked++;
+									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_dram_bound++;
+									if (ptw_latency_mode == PTW_LATENCY_STLB) {
+										cstall = 0; // Only STLB_LATENCY (already paid in STLB RQ)
+									} else if (ptw_latency_mode == PTW_LATENCY_L2) {
+										// Only L2C_LATENCY (already added on L2C miss)
+									} else if (ptw_latency_mode == PTW_LATENCY_L2_LLC) {
+										cstall += LLC_LATENCY;
+									} else {
+										cstall += LLC_LATENCY + 200;
+									}
+								} else {
+									cstall += LLC_LATENCY + 200;
+								}
 							}
 						}
 					}
@@ -1285,6 +1490,11 @@ int main(int argc, char** argv)
 			{"low_bandwidth",  no_argument, 0, 'b'},
 			{"traces",  no_argument, 0, 't'},
 			{"stlb_mode", required_argument, 0, 'S'},
+			{"bound", required_argument, 0, 'B'},
+			{"ptw_bound", required_argument, 0, 'B'},
+			{"latency", required_argument, 0, 'L'},
+			{"latency_mode", required_argument, 0, 'L'},
+			{"ptw_latency", required_argument, 0, 'L'},
 			{"flush_on_end", required_argument, 0, 'F'},
 			{"page_size", required_argument, 0, 'p'},
 			{0, 0, 0, 0}      
@@ -1328,7 +1538,33 @@ int main(int argc, char** argv)
 				else if (strcmp(optarg, "sparsity") == 0)
 					stlb_block_mode = STLB_BLOCK_SPARSITY;
 				else {
-					cerr << "Invalid --stlb_mode (expected analysis or detail): " << optarg << endl;
+					cerr << "Invalid --stlb_mode (expected analysis, detail, or sparsity): " << optarg << endl;
+					return 1;
+				}
+				break;
+			case 'B':
+				if (strcasecmp(optarg, "none") == 0)
+					ptw_bound_mode = PTW_BOUND_NONE;
+				else if (strcasecmp(optarg, "dram") == 0)
+					ptw_bound_mode = PTW_BOUND_DRAM;
+				else if (strcasecmp(optarg, "llc") == 0)
+					ptw_bound_mode = PTW_BOUND_LLC;
+				else {
+					cerr << "Invalid --bound (expected none, dram, or llc): " << optarg << endl;
+					return 1;
+				}
+				break;
+			case 'L':
+				if (strcasecmp(optarg, "none") == 0)
+					ptw_latency_mode = PTW_LATENCY_NONE;
+				else if (strcasecmp(optarg, "stlb") == 0)
+					ptw_latency_mode = PTW_LATENCY_STLB;
+				else if (strcasecmp(optarg, "l2") == 0)
+					ptw_latency_mode = PTW_LATENCY_L2;
+				else if (strcasecmp(optarg, "l2_llc") == 0 || strcasecmp(optarg, "l2+llc") == 0)
+					ptw_latency_mode = PTW_LATENCY_L2_LLC;
+				else {
+					cerr << "Invalid --latency (expected none, stlb, l2, l2_llc, or l2+llc): " << optarg << endl;
 					return 1;
 				}
 				break;
@@ -1342,6 +1578,15 @@ int main(int argc, char** argv)
 
 		if (traces_encountered == 1)
 			break;
+	}
+
+	if (ptw_bound_mode == PTW_BOUND_DRAM && ptw_latency_mode != PTW_LATENCY_STLB && ptw_latency_mode != PTW_LATENCY_L2 && ptw_latency_mode != PTW_LATENCY_L2_LLC) {
+		cerr << "Invalid configuration: when bound is DRAM, latency must be STLB, L2, or L2+LLC" << endl;
+		return 1;
+	}
+	if (ptw_bound_mode == PTW_BOUND_LLC && ptw_latency_mode != PTW_LATENCY_STLB && ptw_latency_mode != PTW_LATENCY_L2) {
+		cerr << "Invalid configuration: when bound is LLC, latency must be STLB or L2" << endl;
+		return 1;
 	}
 
 	// consequences of knobs & print all configuration key-values
@@ -1368,6 +1613,8 @@ int main(int argc, char** argv)
 	cout << "stlb_latency: " << STLB_LATENCY << endl;
 	cout << "stlb_ptes_per_block: " << STLB_PTES_PER_BLOCK << endl;
 	cout << "stlb_block_mode: " << (stlb_block_mode == STLB_BLOCK_SPARSITY ? "sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "analysis" : "default"))) << endl;
+	cout << "bound: " << (ptw_bound_mode == PTW_BOUND_DRAM ? "dram" : (ptw_bound_mode == PTW_BOUND_LLC ? "llc" : "none")) << endl;
+	cout << "latency: " << (ptw_latency_mode == PTW_LATENCY_L2_LLC ? "l2+llc" : (ptw_latency_mode == PTW_LATENCY_L2 ? "l2" : (ptw_latency_mode == PTW_LATENCY_STLB ? "stlb" : "none"))) << endl;
 	cout << "l1i_set: " << L1I_SET << endl;
 	cout << "l1i_way: " << L1I_WAY << endl;
 	cout << "l1i_latency: " << L1I_LATENCY << endl;
