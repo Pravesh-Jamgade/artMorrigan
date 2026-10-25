@@ -53,7 +53,7 @@ int PACKET_QUEUE::check_queue(PACKET *packet)
     if (head < tail) {
         for (uint32_t i=head; i<tail; i++) {
             if (NAME == "L1D_WQ") {
-                if (entry[i].full_addr == packet->full_addr) {
+                if (entry[i].full_addr == packet->full_addr && entry[i].traffic_only == packet->traffic_only) {
                     DP (if (warmup_complete[packet->cpu]) {
                     cout << "[" << NAME << "] " << __func__ << " cpu: " << packet->cpu << " instr_id: " << packet->instr_id << " same address: " << hex << packet->address;
                     cout << " full_addr: " << packet->full_addr << dec << " by instr_id: " << entry[i].instr_id << " index: " << i;
@@ -62,7 +62,7 @@ int PACKET_QUEUE::check_queue(PACKET *packet)
                 }
             }
             else {
-                if (entry[i].address == packet->address) {
+                if (entry[i].address == packet->address && entry[i].traffic_only == packet->traffic_only) {
                     DP (if (warmup_complete[packet->cpu]) {
                     cout << "[" << NAME << "] " << __func__ << " cpu: " << packet->cpu << " instr_id: " << packet->instr_id << " same address: " << hex << packet->address;
                     cout << " full_addr: " << packet->full_addr << dec << " by instr_id: " << entry[i].instr_id << " index: " << i;
@@ -75,7 +75,7 @@ int PACKET_QUEUE::check_queue(PACKET *packet)
     else {
         for (uint32_t i=head; i<SIZE; i++) {
             if (NAME == "L1D_WQ") {
-                if (entry[i].full_addr == packet->full_addr) {
+                if (entry[i].full_addr == packet->full_addr && entry[i].traffic_only == packet->traffic_only) {
                     DP (if (warmup_complete[packet->cpu]) {
                     cout << "[" << NAME << "] " << __func__ << " cpu: " << packet->cpu << " instr_id: " << packet->instr_id << " same address: " << hex << packet->address;
                     cout << " full_addr: " << packet->full_addr << dec << " by instr_id: " << entry[i].instr_id << " index: " << i;
@@ -84,7 +84,7 @@ int PACKET_QUEUE::check_queue(PACKET *packet)
                 }
             }
             else {
-                if (entry[i].address == packet->address) {
+                if (entry[i].address == packet->address && entry[i].traffic_only == packet->traffic_only) {
                     DP (if (warmup_complete[packet->cpu]) {
                     cout << "[" << NAME << "] " << __func__ << " cpu: " << packet->cpu << " instr_id: " << packet->instr_id << " same address: " << hex << packet->address;
                     cout << " full_addr: " << packet->full_addr << dec << " by instr_id: " << entry[i].instr_id << " index: " << i;
@@ -95,7 +95,7 @@ int PACKET_QUEUE::check_queue(PACKET *packet)
         }
         for (uint32_t i=0; i<tail; i++) {
             if (NAME == "L1D_WQ") {
-                if (entry[i].full_addr == packet->full_addr) {
+                if (entry[i].full_addr == packet->full_addr && entry[i].traffic_only == packet->traffic_only) {
                     DP (if (warmup_complete[packet->cpu]) {
                     cout << "[" << NAME << "] " << __func__ << " cpu: " << packet->cpu << " instr_id: " << packet->instr_id << " same address: " << hex << packet->address;
                     cout << " full_addr: " << packet->full_addr << dec << " by instr_id: " << entry[i].instr_id << " index: " << i;
@@ -104,7 +104,7 @@ int PACKET_QUEUE::check_queue(PACKET *packet)
                 }
             }
             else {
-                if (entry[i].address == packet->address) {
+                if (entry[i].address == packet->address && entry[i].traffic_only == packet->traffic_only) {
                     DP (if (warmup_complete[packet->cpu]) {
                     cout << "[" << NAME << "] " << __func__ << " cpu: " << packet->cpu << " instr_id: " << packet->instr_id << " same address: " << hex << packet->address;
                     cout << " full_addr: " << packet->full_addr << dec << " by instr_id: " << entry[i].instr_id << " index: " << i;

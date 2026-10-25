@@ -14,15 +14,20 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 
 enum STLB_BLOCK_MODE { STLB_BLOCK_ANALYSIS, STLB_BLOCK_DETAIL, STLB_BLOCK_SPARSITY };
 #define DEFAULT_STLB_BLOCK_MODE STLB_BLOCK_ANALYSIS
-enum PTW_BOUND_MODE { PTW_BOUND_NONE, PTW_BOUND_DRAM, PTW_BOUND_LLC };
+enum PTW_BOUND_MODE { PTW_BOUND_NONE = 0, PTW_BOUND_DRAM = 1, PTW_BOUND_LLC = 2, PTW_BOUND_ALL = 3 };
 enum PTW_LATENCY_MODE { PTW_LATENCY_NONE, PTW_LATENCY_STLB, PTW_LATENCY_L2, PTW_LATENCY_L2_LLC };
 #define DEFAULT_PTW_BOUND_MODE PTW_BOUND_NONE
 #define DEFAULT_PTW_LATENCY_MODE PTW_LATENCY_L2
+#define TRAFFIC_ONLY_PACKETS 0
+#define STLB_ORACLE 0
 #define FLUSH_ON_END 1
 extern STLB_BLOCK_MODE stlb_block_mode;
 extern PTW_BOUND_MODE ptw_bound_mode;
 extern PTW_LATENCY_MODE ptw_latency_mode;
+extern uint8_t knob_traffic_only_packets;
+extern uint8_t knob_stlb_oracle;
 bool lookup_allocated_pte(uint32_t cpu, uint64_t vpn, uint64_t *ppn);
+uint64_t allocate_or_lookup_pte_oracle(uint32_t cpu, uint64_t va, uint64_t unique_vpage);
 
 #define P2TLB 0
 #define PTW_START_LEVEL 2 // 1: L1D, 2: L2C
@@ -156,7 +161,8 @@ class CACHE : public MEMORY {
 			uint8_t entry_offset_in_block[STLB_PTES_PER_BLOCK];
 			uint32_t lru, rereference_count;
 			uint8_t valid_mask, accessed_mask, prefilled_mask;
-			STLB_BLOCK_ENTRY() : tag(0), lru(0), rereference_count(0), valid_mask(0), accessed_mask(0), prefilled_mask(0) {
+			uint8_t non_compulsory_hit_where; // 0 = compulsory or L1D/PWC, 2 = L2C, 3 = LLC, 4 = DRAM
+			STLB_BLOCK_ENTRY() : tag(0), lru(0), rereference_count(0), valid_mask(0), accessed_mask(0), prefilled_mask(0), non_compulsory_hit_where(0) {
 				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) {
 					pte[i] = 0;
 					entry_offset_in_block[i] = 0;
@@ -195,6 +201,10 @@ class CACHE : public MEMORY {
 		uint64_t stlb_non_compulsory_tracked;
 		uint64_t stlb_non_compulsory_tracked_dram_bound;
 		uint64_t stlb_non_compulsory_tracked_llc_bound;
+		uint64_t total_ptw_cycles;
+		uint64_t total_ptw_count;
+		// [bound: 0=L2, 1=LLC, 2=DRAM][rrc: 0=rrc0, 1..6=rrc1..32+][footprint - 1: 0..STLB_PTES_PER_BLOCK-1]
+		uint64_t stlb_non_compulsory_rrc_footprint[3][7][STLB_PTES_PER_BLOCK];
 		uint64_t translation_valid_entries_on_eviction[9];
 		uint64_t translation_valid_footprint_matrix[9][9]; // [valid][footprint] (footprint: 0..8)
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
@@ -353,6 +363,12 @@ class CACHE : public MEMORY {
 				stlb_non_compulsory_tracked = 0;
 				stlb_non_compulsory_tracked_dram_bound = 0;
 				stlb_non_compulsory_tracked_llc_bound = 0;
+				total_ptw_cycles = 0;
+				total_ptw_count = 0;
+				for (int b = 0; b < 3; ++b)
+					for (int r = 0; r < 7; ++r)
+						for (int fp = 0; fp < STLB_PTES_PER_BLOCK; ++fp)
+							stlb_non_compulsory_rrc_footprint[b][r][fp] = 0;
 				for (int i = 0; i < 9; ++i) {
 					translation_valid_entries_on_eviction[i] = 0;
 					for (int j = 0; j < 9; ++j) translation_valid_footprint_matrix[i][j] = 0;
@@ -456,7 +472,7 @@ class CACHE : public MEMORY {
 		// functions
 		pair<int, int> check_hit_stlb_pq(uint64_t vpn);
 		bool stlb_block_lookup(uint64_t vpn, uint64_t full_addr, uint64_t *ppn, bool update_lru = true);
-		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint64_t full_addr, uint8_t hit_where = 0);
+		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint64_t full_addr, uint8_t hit_where = 0, uint8_t is_non_compulsory = 0);
 		void stlb_block_invalidate(uint64_t vpn, uint64_t full_addr=0);
 		void evict_stlb_block(STLB_BLOCK_ENTRY &entry);
 

@@ -278,6 +278,24 @@ void CACHE::handle_fill()
 
 		uint32_t mshr_index = MSHR.next_fill_index;
 
+		if (knob_traffic_only_packets && MSHR.entry[mshr_index].traffic_only) {
+			if (MSHR.entry[mshr_index].fill_level < fill_level) {
+				if (fill_level == FILL_L2) {
+					if (MSHR.entry[mshr_index].fill_l1i)
+						upper_level_icache[fill_cpu]->return_data(&MSHR.entry[mshr_index]);
+					if (MSHR.entry[mshr_index].fill_l1d)
+						upper_level_dcache[fill_cpu]->return_data(&MSHR.entry[mshr_index]);
+				} else {
+					upper_level_dcache[fill_cpu]->return_data(&MSHR.entry[mshr_index]);
+				}
+			}
+
+			MSHR.remove_queue(&MSHR.entry[mshr_index]);
+			MSHR.num_returned--;
+			update_fill_cycle();
+			return;
+		}
+
 		// find victim
 		uint32_t set = get_set(MSHR.entry[mshr_index].address), way;
 		if (cache_type == IS_LLC) {
@@ -797,6 +815,59 @@ void CACHE::handle_fill()
 			if ((RQ.entry[RQ.head].event_cycle <= current_core_cycle[read_cpu]) && (RQ.occupancy > 0)) {
 				int index = RQ.head;
 
+				if (knob_traffic_only_packets && RQ.entry[index].traffic_only) {
+					if (RQ.entry[index].traffic_target_fill_level <= fill_level) {
+						if (RQ.entry[index].fill_level < fill_level) {
+							if (fill_level == FILL_L2) {
+								if (RQ.entry[index].fill_l1i)
+									upper_level_icache[read_cpu]->return_data(&RQ.entry[index]);
+								if (RQ.entry[index].fill_l1d)
+									upper_level_dcache[read_cpu]->return_data(&RQ.entry[index]);
+							} else {
+								upper_level_dcache[read_cpu]->return_data(&RQ.entry[index]);
+							}
+						}
+						RQ.remove_queue(&RQ.entry[index]);
+						reads_available_this_cycle--;
+					} else {
+						uint8_t miss_handled = 1;
+						int mshr_index = check_mshr(&RQ.entry[index]);
+
+						if (mshr_index == -2) {
+							miss_handled = 0;
+						} else if ((mshr_index == -1) && (MSHR.occupancy < MSHR_SIZE)) {
+							if (lower_level) {
+								if (lower_level->get_occupancy(1, RQ.entry[index].address) == lower_level->get_size(1, RQ.entry[index].address)) {
+									miss_handled = 0;
+								} else {
+									add_mshr(&RQ.entry[index]);
+									lower_level->add_rq(&RQ.entry[index]);
+								}
+							} else {
+								add_mshr(&RQ.entry[index]);
+							}
+						} else if ((mshr_index == -1) && (MSHR.occupancy == MSHR_SIZE)) {
+							miss_handled = 0;
+						} else if (mshr_index != -1) {
+							if (RQ.entry[index].fill_level < MSHR.entry[mshr_index].fill_level)
+								MSHR.entry[mshr_index].fill_level = RQ.entry[index].fill_level;
+							if ((RQ.entry[index].fill_l1i) && (MSHR.entry[mshr_index].fill_l1i != 1))
+								MSHR.entry[mshr_index].fill_l1i = 1;
+							if ((RQ.entry[index].fill_l1d) && (MSHR.entry[mshr_index].fill_l1d != 1))
+								MSHR.entry[mshr_index].fill_l1d = 1;
+						}
+
+						if (miss_handled) {
+							RQ.remove_queue(&RQ.entry[index]);
+							reads_available_this_cycle--;
+						}
+					}
+
+					if (reads_available_this_cycle == 0)
+						return;
+					continue;
+				}
+
 				// access cache
 				uint32_t set = get_set(RQ.entry[index].address);
 				int way = check_hit(&RQ.entry[index]);
@@ -820,10 +891,10 @@ void CACHE::handle_fill()
 					}
 					else if (cache_type == IS_STLB){
 						vpn_history.insert(RQ.entry[index].address);
-						if (stlb_block_mode != STLB_BLOCK_DETAIL && stlb_block_mode != STLB_BLOCK_SPARSITY)
+						if (stlb_block_mode != STLB_BLOCK_DETAIL && stlb_block_mode != STLB_BLOCK_SPARSITY && !knob_stlb_oracle)
 							RQ.entry[index].data = block[set][way].data;
 
-						if (stlb_block_mode != STLB_BLOCK_DETAIL && stlb_block_mode != STLB_BLOCK_SPARSITY && current_core_cycle[read_cpu] < block[set][way].stalls)
+						if (stlb_block_mode != STLB_BLOCK_DETAIL && stlb_block_mode != STLB_BLOCK_SPARSITY && !knob_stlb_oracle && current_core_cycle[read_cpu] < block[set][way].stalls)
 							add_stall_prefetch(block[set][way].stalls-current_core_cycle[read_cpu], read_cpu);
 					}
 					else if (cache_type == IS_L1I) {
@@ -986,6 +1057,7 @@ void CACHE::handle_fill()
 												v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
 												pa = v2p.pa;
 												RQ.entry[index].hit_where = v2p.hit_where;
+												RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
 												int victim_entry = fctb_replacement_policy();
 												fctb[victim_entry][0] = current_vpn;
 												fctb[victim_entry][1] = (RQ.entry[index].full_addr & 0x7000)/4096;
@@ -999,6 +1071,7 @@ void CACHE::handle_fill()
 													v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
 													pa = v2p.pa;
 													RQ.entry[index].hit_where = v2p.hit_where;
+													RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
 												}
 											}
 										}
@@ -1006,6 +1079,7 @@ void CACHE::handle_fill()
 											v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
 											pa  = v2p.pa;
 											RQ.entry[index].hit_where = v2p.hit_where;
+											RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
 										}
 										if (iflag == 1)
 											pf_misses_pq++;
@@ -1641,7 +1715,7 @@ void CACHE::handle_fill()
 		return false;
 	}
 
-	void CACHE::stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint64_t full_addr, uint8_t hit_where)
+	void CACHE::stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint64_t full_addr, uint8_t hit_where, uint8_t is_non_compulsory)
 	{
 		if (stlb_block_mode == STLB_BLOCK_SPARSITY) {
 			// stlb_sparsity fill:
@@ -1676,6 +1750,9 @@ void CACHE::handle_fill()
 			if (existing_way != -1) {
 				stlb_sparsity_existing_way_count++;
 				STLB_BLOCK_ENTRY &entry = stlb_block[set][existing_way];
+				if (entry.non_compulsory_hit_where == 0 && is_non_compulsory && hit_where >= 2 && hit_where <= 4) {
+					entry.non_compulsory_hit_where = hit_where;
+				}
 				
 				// Install req_offset into this existing block without replacing/resetting the block
 				uint64_t req_ppn = 0;
@@ -1742,6 +1819,7 @@ void CACHE::handle_fill()
 			entry.accessed_mask = 0;
 			entry.prefilled_mask = 0;
 			entry.rereference_count = 0;
+			entry.non_compulsory_hit_where = (is_non_compulsory && hit_where >= 2 && hit_where <= 4) ? hit_where : 0;
 
 			// Record histogram for hit_where location used as filter source
 			uint8_t hit_loc = (hit_where <= 4) ? hit_where : 4;
@@ -1938,6 +2016,11 @@ void CACHE::handle_fill()
 		const bool replacing = entry.valid_mask && entry.tag != block_vpn;
 		if (replacing)
 			evict_stlb_block(entry);
+		if (existing_way == -1) {
+			entry.non_compulsory_hit_where = (is_non_compulsory && hit_where >= 2 && hit_where <= 4) ? hit_where : 0;
+		} else if (entry.non_compulsory_hit_where == 0 && is_non_compulsory && hit_where >= 2 && hit_where <= 4) {
+			entry.non_compulsory_hit_where = hit_where;
+		}
 		entry.tag = block_vpn;
 		entry.valid_mask = 0;
 		entry.accessed_mask = 0;
@@ -2029,8 +2112,10 @@ void CACHE::handle_fill()
 	void CACHE::evict_stlb_block(STLB_BLOCK_ENTRY &entry)
 	{
 		uint8_t mask = entry.accessed_mask;
-		if (!mask)
+		if (!mask) {
+			entry.non_compulsory_hit_where = 0;
 			return;
+		}
 		uint32_t footprint = 0;
 		for (; mask; mask >>= 1)
 			footprint += mask & 1;
@@ -2043,8 +2128,15 @@ void CACHE::handle_fill()
 		stlb_valid_entries_on_eviction[valid_stlb_count]++;
 		stlb_valid_footprint_matrix[valid_stlb_count][footprint]++;
 
+		if (entry.non_compulsory_hit_where >= 2 && entry.non_compulsory_hit_where <= 4) {
+			const uint32_t bound_idx = entry.non_compulsory_hit_where - 2; // 0: L2, 1: LLC, 2: DRAM
+			const uint32_t rrc_idx = entry.rereference_count ? (1 + rrc_bucket(entry.rereference_count)) : 0;
+			stlb_non_compulsory_rrc_footprint[bound_idx][rrc_idx][footprint - 1]++;
+		}
+
 		entry.accessed_mask = 0;
 		entry.prefilled_mask = 0;
+		entry.non_compulsory_hit_where = 0;
 
 		if (entry.rereference_count) {
 			const uint32_t bucket = rrc_bucket(entry.rereference_count);
@@ -2067,7 +2159,7 @@ void CACHE::handle_fill()
 	{
 		record_footprint_on_eviction(set, way);
 		if (cache_type == IS_STLB) {
-			stlb_block_fill(packet->cpu, packet->address, packet->full_addr, packet->hit_where);
+			stlb_block_fill(packet->cpu, packet->address, packet->full_addr, packet->hit_where, packet->is_non_compulsory);
 			
 			// If we are not in analysis mode, the stlb_block handles everything.
 			if (stlb_block_mode != STLB_BLOCK_ANALYSIS)
@@ -2149,6 +2241,15 @@ void CACHE::handle_fill()
 
 	int CACHE::check_hit(PACKET *packet)
 	{
+		if (cache_type == IS_STLB && knob_stlb_oracle) {
+			uint64_t ppn = 0;
+			if (!lookup_allocated_pte(packet->cpu, packet->address, &ppn)) {
+				ppn = allocate_or_lookup_pte_oracle(packet->cpu, packet->full_addr ? packet->full_addr : (packet->address << LOG2_PAGE_SIZE), packet->address);
+			}
+			stlb_block_hits++;
+			packet->data = ppn;
+			return 0;
+		}
 		if (cache_type == IS_STLB && (stlb_block_mode == STLB_BLOCK_DETAIL || stlb_block_mode == STLB_BLOCK_SPARSITY)) {
 			uint64_t ppn = 0;
 			if (stlb_block_lookup(packet->address, (packet->full_addr ? packet->full_addr: packet->address), &ppn)) {
@@ -2228,6 +2329,58 @@ void CACHE::handle_fill()
 
 	int CACHE::add_rq(PACKET *packet)
 	{
+		if (knob_traffic_only_packets && packet->traffic_only) {
+			int index = RQ.check_queue(packet);
+			if (index != -1) {
+				if (packet->fill_level < RQ.entry[index].fill_level)
+					RQ.entry[index].fill_level = packet->fill_level;
+				if (packet->traffic_target_fill_level > RQ.entry[index].traffic_target_fill_level)
+					RQ.entry[index].traffic_target_fill_level = packet->traffic_target_fill_level;
+				if ((packet->fill_l1i) && (RQ.entry[index].fill_l1i != 1))
+					RQ.entry[index].fill_l1i = 1;
+				if ((packet->fill_l1d) && (RQ.entry[index].fill_l1d != 1))
+					RQ.entry[index].fill_l1d = 1;
+
+				RQ.MERGED++;
+				RQ.ACCESS++;
+				return index;
+			}
+
+			if (RQ.occupancy == RQ_SIZE) {
+				RQ.FULL++;
+				return -2;
+			}
+
+			index = RQ.tail;
+#ifdef SANITY_CHECK
+			if (RQ.entry[index].address != 0) {
+				cerr << "[" << NAME << "_ERROR] " << __func__ << " is not empty index: " << index;
+				cerr << " address: " << hex << RQ.entry[index].address;
+				cerr << " full_addr: " << RQ.entry[index].full_addr << dec << endl;
+				assert(0);
+			}
+#endif
+			RQ.entry[index] = *packet;
+
+			if (RQ.entry[index].event_cycle < current_core_cycle[packet->cpu])
+				RQ.entry[index].event_cycle = current_core_cycle[packet->cpu] + LATENCY;
+			else
+				RQ.entry[index].event_cycle += LATENCY;
+
+			RQ.occupancy++;
+			RQ.tail++;
+			if (RQ.tail >= RQ.SIZE)
+				RQ.tail = 0;
+
+			if (packet->address == 0)
+				assert(0);
+
+			RQ.TO_CACHE++;
+			RQ.ACCESS++;
+
+			return -1;
+		}
+
 		// check for the latest wirtebacks in the write queue
 		int wq_index = WQ.check_queue(packet);
 		if (wq_index != -1) {
@@ -2814,6 +2967,8 @@ void CACHE::handle_fill()
 		MSHR.entry[mshr_index].returned = COMPLETED;
 		MSHR.entry[mshr_index].data = packet->data;
 		MSHR.entry[mshr_index].pf_metadata = packet->pf_metadata;
+		MSHR.entry[mshr_index].hit_where = packet->hit_where;
+		MSHR.entry[mshr_index].is_non_compulsory = packet->is_non_compulsory;
 
 		// ADD LATENCY
 		if (MSHR.entry[mshr_index].event_cycle < current_core_cycle[packet->cpu])
@@ -2869,7 +3024,7 @@ void CACHE::handle_fill()
 
 		for (uint32_t index=0; index<MSHR_SIZE; index++)
 		{
-			if (MSHR.entry[index].address == packet->address)
+			if (MSHR.entry[index].address == packet->address && MSHR.entry[index].traffic_only == packet->traffic_only)
 			{
 				//if(MSHR.entry[index].instruction != packet->instruction)
 				//  {

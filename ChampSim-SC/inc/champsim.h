@@ -117,6 +117,7 @@ struct VA_TO_PA_RESULT {
 	uint64_t pa;
 	uint64_t cstall;
 	uint8_t hit_where;
+	uint8_t is_non_compulsory;
 };
 
 VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t unique_vpage, uint64_t ip, int type, int iflag, bool magic);

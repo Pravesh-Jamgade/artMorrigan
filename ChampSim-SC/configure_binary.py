@@ -33,6 +33,9 @@ LEGACY_OPTIONS = {
     "--latency": "simulator.latency",
     "--latency_mode": "simulator.latency",
     "--ptw_latency": "simulator.latency",
+    "--traffic_only_packets": "simulator.traffic_only_packets",
+    "--ptw_traffic_packets": "simulator.traffic_only_packets",
+    "--stlb_oracle": "simulator.stlb_oracle",
     "--ptw_start_level": "simulator.ptw_start_level",
     "--flush_on_end": "simulator.flush_on_end",
     "--asap": "simulator.asap", "-asap": "simulator.asap",
@@ -62,13 +65,13 @@ LEGACY_OPTIONS = {
 }
 
 
-def cli() -> tuple[Path, dict[str, str]]:
+def cli() -> tuple[list[Path], dict[str, str]]:
     parser = argparse.ArgumentParser(
-        description="Apply an INI configuration and compile ChampSim.",
+        description="Apply one or more INI configurations and compile ChampSim.",
         epilog="Example: ./generate_binary.sh configs/tage2.ini",
     )
-    parser.add_argument("config", nargs="?", type=Path, help="INI file (default: configs/default.ini)")
-    parser.add_argument("--config", dest="named_config", type=Path, help="INI file")
+    parser.add_argument("configs", nargs="*", type=Path, help="INI file(s) applied in order (default: configs/default.ini)")
+    parser.add_argument("--config", dest="named_configs", action="append", default=[], type=Path, help="INI file (may be repeated)")
     parser.add_argument("--set", action="append", default=[], metavar="SECTION.KEY=VALUE",
                         help="override one INI value; may be repeated")
     known, extra = parser.parse_known_args()
@@ -87,34 +90,111 @@ def cli() -> tuple[Path, dict[str, str]]:
             parser.error(f"unknown or incomplete option: {extra[i]}")
         overrides[LEGACY_OPTIONS[extra[i]]] = extra[i + 1]
         i += 2
-    return (known.named_config or known.config or DEFAULT_CONFIG), overrides
+    selected_list = [*known.configs, *known.named_configs]
+    if not selected_list:
+        selected_list = [DEFAULT_CONFIG]
+    return selected_list, overrides
 
 
-def load_config(selected: Path, overrides: dict[str, str]) -> configparser.ConfigParser:
+def resolve_include_path(raw_path: str, parent_file: Path) -> Path:
+    candidate = Path(raw_path.strip().strip("\"'"))
+    if candidate.is_absolute():
+        return candidate.resolve()
+    search_dirs = [parent_file.parent, ROOT / "configs", ROOT]
+    for base in search_dirs:
+        resolved = (base / candidate).resolve()
+        if resolved.is_file():
+            return resolved
+    return (parent_file.parent / candidate).resolve()
+
+
+def collect_config_chain(config_path: Path, visited: set[Path] | None = None) -> list[Path]:
+    if visited is None:
+        visited = set()
+    resolved = config_path.resolve()
+    if resolved in visited:
+        raise ValueError(f"circular config include detected for: {resolved}")
+    if not resolved.is_file():
+        raise ValueError(f"configuration file not found: {resolved}")
+    visited.add(resolved)
+
+    raw_text = resolved.read_text()
+    include_specs: list[str] = []
+
+    # Support top-level 'include = ...' or '#include ...' before any section header
+    body_lines: list[str] = []
+    in_section = False
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_section = True
+        if not in_section:
+            m = re.match(r"^(?:include|extends|#include)\s*(?:=|\s)\s*(.+)$", stripped, re.IGNORECASE)
+            if m:
+                include_specs.append(m.group(1))
+                continue
+        body_lines.append(line)
+
+    temp_parser = configparser.ConfigParser(interpolation=None)
+    temp_parser.read_string("\n".join(body_lines), source=str(resolved))
+
+    for sec in temp_parser.sections():
+        for key in ("include", "extends"):
+            if temp_parser.has_option(sec, key):
+                include_specs.append(temp_parser.get(sec, key))
+
+    chain: list[Path] = []
+    for spec in include_specs:
+        for part in re.split(r"[,\s]+", spec.strip()):
+            if not part:
+                continue
+            inc_path = resolve_include_path(part, resolved)
+            chain.extend(collect_config_chain(inc_path, visited.copy()))
+    chain.append(resolved)
+    return chain
+
+
+def read_single_ini(config: configparser.ConfigParser, path: Path) -> None:
+    body_lines: list[str] = []
+    in_section = False
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_section = True
+        if not in_section and re.match(r"^(?:include|extends|#include)\s*(?:=|\s)\s*(.+)$", stripped, re.IGNORECASE):
+            continue
+        body_lines.append(line)
+    config.read_string("\n".join(body_lines), source=str(path))
+    for sec in config.sections():
+        for key in ("include", "extends"):
+            if config.has_option(sec, key):
+                config.remove_option(sec, key)
+
+
+def load_config(selected_list: list[Path], overrides: dict[str, str]) -> configparser.ConfigParser:
     config = configparser.ConfigParser(interpolation=None)
-    files = [DEFAULT_CONFIG]
-    selected = selected.resolve()
-    if selected != DEFAULT_CONFIG.resolve():
-        files.append(selected)
-    missing = [str(path) for path in files if not path.is_file()]
-    if missing:
-        raise ValueError(f"configuration file not found: {', '.join(missing)}")
-    config.read(files)
+    files: list[Path] = [DEFAULT_CONFIG.resolve()]
+    for selected in selected_list:
+        for path in collect_config_chain(selected):
+            if path not in files or path != DEFAULT_CONFIG.resolve():
+                files.append(path)
+    for path in files:
+        read_single_ini(config, path)
     if config.has_option("simulator", "latency_mode"):
         config.set("simulator", "latency", config.get("simulator", "latency_mode"))
     for dotted, value in overrides.items():
         section, key = dotted.split(".", 1)
         if section == "simulator" and key == "latency_mode":
             key = "latency"
-        if not config.has_section(section) or not config.has_option(section, key):
-            raise ValueError(f"unknown configuration knob: {dotted}")
+        if not config.has_section(section):
+            config.add_section(section)
         config.set(section, key, value)
     return config
 
 
 def value(config: configparser.ConfigParser, section: str, key: str) -> str:
     raw = config.get(section, key).strip()
-    if not re.fullmatch(r"[A-Za-z0-9_+.-]*", raw):
+    if not re.fullmatch(r"[A-Za-z0-9_+.,-]*", raw):
         raise ValueError(f"invalid value for {section}.{key}: {raw!r}")
     return raw
 
@@ -190,15 +270,30 @@ def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
         raise ValueError("simulator.stlb_ptes_per_block must be 1, 2, 4, or 8")
     replace_define("inc/cache.h", "STLB_PTES_PER_BLOCK", stlb_ptes)
 
-    bound_modes = {
-        "none": "PTW_BOUND_NONE",
-        "dram": "PTW_BOUND_DRAM",
-        "llc": "PTW_BOUND_LLC",
+    bound_val = 0
+    bound_str = get("simulator", "bound").lower()
+    tokens = [t.strip() for t in re.split(r"[,+\s]+", bound_str) if t.strip()]
+    if not tokens:
+        tokens = ["none"]
+    for t in tokens:
+        if t == "none":
+            pass
+        elif t == "dram":
+            bound_val |= 1
+        elif t == "llc":
+            bound_val |= 2
+        elif t == "all":
+            bound_val |= 3
+        else:
+            raise ValueError(f"unknown bound option: {t!r} in {bound_str!r}. Expected none, dram, llc, or combination like llc,dram")
+
+    bound_mode_defines = {
+        0: "PTW_BOUND_NONE",
+        1: "PTW_BOUND_DRAM",
+        2: "PTW_BOUND_LLC",
+        3: "PTW_BOUND_ALL",
     }
-    bound_mode = get("simulator", "bound").lower()
-    if bound_mode not in bound_modes:
-        raise ValueError("simulator.bound must be none, dram, or llc")
-    replace_define("inc/cache.h", "DEFAULT_PTW_BOUND_MODE", bound_modes[bound_mode])
+    replace_define("inc/cache.h", "DEFAULT_PTW_BOUND_MODE", bound_mode_defines[bound_val])
 
     latency_modes = {
         "none": "PTW_LATENCY_NONE",
@@ -210,10 +305,10 @@ def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
     latency_mode = get("simulator", "latency").lower()
     if latency_mode not in latency_modes:
         raise ValueError("simulator.latency must be none, stlb, l2, l2_llc, or l2+llc")
-    if bound_mode == "dram" and latency_mode not in {"stlb", "l2", "l2_llc", "l2+llc"}:
-        raise ValueError("when simulator.bound is dram, simulator.latency must be stlb, l2, l2_llc, or l2+llc")
-    if bound_mode == "llc" and latency_mode not in {"stlb", "l2"}:
-        raise ValueError("when simulator.bound is llc, simulator.latency must be stlb or l2")
+    if (bound_val & 1) and latency_mode not in {"stlb", "l2", "l2_llc", "l2+llc"}:
+        raise ValueError("when simulator.bound includes dram, simulator.latency must be stlb, l2, l2_llc, or l2+llc")
+    if (bound_val & 2) and not (bound_val & 1) and latency_mode not in {"stlb", "l2"}:
+        raise ValueError("when simulator.bound is only llc, simulator.latency must be stlb or l2")
     replace_define("inc/cache.h", "DEFAULT_PTW_LATENCY_MODE", latency_modes[latency_mode])
 
     ptw_start_levels = {"l1": "1", "l2": "2"}
@@ -229,6 +324,7 @@ def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
         "SUCCESSORS": "successors", "RESET_FREQ": "reset_frequency", "RP_MP": "replacement_policy",
         "LLIMIT": "lookahead_limit", "CNF_BITS": "confidence_bits",
         "RP_SUC_MP": "successor_replacement_policy", "FLUSH_ON_END": "flush_on_end",
+        "TRAFFIC_ONLY_PACKETS": "traffic_only_packets", "STLB_ORACLE": "stlb_oracle",
     }
     for macro, key in cache_macros.items():
         replace_define("inc/cache.h", macro, get("simulator", key))
@@ -269,10 +365,11 @@ def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
 
 def main() -> int:
     try:
-        selected, overrides = cli()
-        config = load_config(selected, overrides)
-        args = configure(config, selected)
-        print(f"Configuration: {selected.resolve()}")
+        selected_list, overrides = cli()
+        config = load_config(selected_list, overrides)
+        primary_config = selected_list[-1]
+        args = configure(config, primary_config)
+        print(f"Configuration: {', '.join(str(p.resolve()) for p in selected_list)}")
         subprocess.run([str(ROOT / "build_champsim.sh"), *args], cwd=ROOT, check=True)
     except (ValueError, configparser.Error, subprocess.CalledProcessError) as error:
         print(f"[ERROR] {error}", file=sys.stderr)

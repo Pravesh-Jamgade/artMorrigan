@@ -333,8 +333,8 @@ void MEMORY_CONTROLLER::process(PACKET_QUEUE *queue)
                 // send data back to the core cache hierarchy
                 // The legacy PTW obtains the translation synchronously, but its
                 // backing read still participates in DRAM scheduling.  It has no
-                // cache MSHR waiting for a data callback.
-                if (!queue->entry[request_index].is_ptw)
+                // cache MSHR waiting for a data callback unless it is a TrafficOnlyPacket.
+                if (!queue->entry[request_index].is_ptw || queue->entry[request_index].traffic_only)
                     upper_level_dcache[op_cpu]->return_data(&queue->entry[request_index]);
 
                 if (bank_request[op_channel][op_rank][op_bank].row_buffer_hit)
@@ -421,6 +421,10 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
 {
     // simply return read requests with dummy response before the warmup
     if (all_warmup_complete < NUM_CPUS) {
+        if (packet->traffic_only) {
+            upper_level_dcache[packet->cpu]->return_data(packet);
+            return -1;
+        }
 		if (packet->is_ptw)
 			return -1;
         if (packet->instruction) 
@@ -433,7 +437,7 @@ int MEMORY_CONTROLLER::add_rq(PACKET *packet)
 
     // check for the latest wirtebacks in the write queue
     uint32_t channel = dram_get_channel(packet->address);
-    int wq_index = check_dram_queue(&WQ[channel], packet);
+    int wq_index = packet->traffic_only ? -1 : check_dram_queue(&WQ[channel], packet);
     if (wq_index != -1) {
         
         // no need to check fill level
@@ -607,7 +611,7 @@ int MEMORY_CONTROLLER::check_dram_queue(PACKET_QUEUE *queue, PACKET *packet)
 {
     // search write queue
     for (uint32_t index=0; index<queue->SIZE; index++) {
-        if (queue->entry[index].address == packet->address) {
+        if (queue->entry[index].address == packet->address && queue->entry[index].traffic_only == packet->traffic_only) {
             
             DP ( if (warmup_complete[packet->cpu]) {
             cout << "[" << queue->NAME << "] " << __func__ << " same entry instr_id: " << packet->instr_id << " prior_id: " << queue->entry[index].instr_id;

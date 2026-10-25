@@ -81,6 +81,7 @@ class PACKET {
 		uint8_t instruction, 
 			is_data,
 			is_ptw,
+			traffic_only,
 			ptw_level,
 			fill_l1i,
 			fill_l1d,
@@ -92,6 +93,7 @@ class PACKET {
 			drc_tag_read;
 
 		int fill_level, 
+		    traffic_target_fill_level,
 		    pf_origin_level,
 		    rob_signal, 
 		    rob_index, 
@@ -105,7 +107,8 @@ class PACKET {
 		    lad,
 		    irip,
 		    conf,
-		    hit_where; // Location where PTW hit/found translation: 0=PWC, 1=L1D, 2=L2C, 3=LLC, 4=DRAM
+		    hit_where, // Location where PTW hit/found translation: 0=PWC, 1=L1D, 2=L2C, 3=LLC, 4=DRAM
+		    is_non_compulsory;
 
 		uint32_t pf_metadata;
 
@@ -142,6 +145,7 @@ class PACKET {
 				 instruction = 0;
 				 is_data = 1;
 				 is_ptw = 0;
+				 traffic_only = 0;
 				 ptw_level = UINT8_MAX;
 				 fill_l1i = 0;
 				 fill_l1d = 0;
@@ -158,6 +162,7 @@ class PACKET {
 				 type = 0;
 
 				 fill_level = -1; 
+				 traffic_target_fill_level = 0;
 				 rob_signal = -1;
 				 rob_index = -1;
 				 producer = -1;
@@ -171,6 +176,7 @@ class PACKET {
 				 lad = 0;
 				 conf = 0;
 				 hit_where = 0;
+				 is_non_compulsory = 0;
 
 #if 0
 				 for (uint32_t i=0; i<ROB_SIZE; i++) {

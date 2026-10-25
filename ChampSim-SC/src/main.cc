@@ -13,6 +13,8 @@ uint8_t warmup_complete[NUM_CPUS],
 	MAX_INSTR_DESTINATIONS = NUM_INSTR_DESTINATIONS,
 	knob_cloudsuite = 0,
 	knob_low_bandwidth = 0,
+	knob_traffic_only_packets = TRAFFIC_ONLY_PACKETS,
+	knob_stlb_oracle = STLB_ORACLE,
 	knob_flush_on_end = FLUSH_ON_END;
 
 uint64_t warmup_instructions     = 1000000,
@@ -154,6 +156,27 @@ void write_csv_stats()
 		write_csv_scalar(csv, prefix + "STLB_non_compulsory_tracked", ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked);
 		write_csv_scalar(csv, prefix + "STLB_non_compulsory_tracked_dram_bound", ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_dram_bound);
 		write_csv_scalar(csv, prefix + "STLB_non_compulsory_tracked_llc_bound", ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_llc_bound);
+		double avg_ptw_cycles = (ooo_cpu[cpu].STLB.total_ptw_count == 0) ? 0.0 :
+			((double)ooo_cpu[cpu].STLB.total_ptw_cycles / ooo_cpu[cpu].STLB.total_ptw_count);
+		write_csv_scalar(csv, prefix + "STLB_total_ptw_cycles", ooo_cpu[cpu].STLB.total_ptw_cycles);
+		write_csv_scalar(csv, prefix + "STLB_total_ptw_count", ooo_cpu[cpu].STLB.total_ptw_count);
+		write_csv_scalar(csv, prefix + "STLB_avg_ptw_cycles", avg_ptw_cycles);
+
+		const char* stlb_bound_names[3] = {"L2_BOUND", "LLC_BOUND", "DRAM_BOUND"};
+		const vector<string> stlb_rrc_labels{"0", "1", "2", "4", "8", "16", "32"};
+		for (uint32_t b = 0; b < 3; ++b) {
+			csv << "RRC_FOOTPRINT,STLB_NON_COMPULSORY_" << stlb_bound_names[b] << ",cpu," << cpu << '\n';
+			csv << "rrc";
+			for (uint32_t ptes = 1; ptes <= STLB_PTES_PER_BLOCK; ++ptes)
+				csv << ',' << ptes;
+			csv << '\n';
+			for (uint32_t r = 0; r < 7; ++r) {
+				csv << "rrc" << stlb_rrc_labels[r];
+				for (uint32_t fp = 0; fp < STLB_PTES_PER_BLOCK; ++fp)
+					csv << ',' << ooo_cpu[cpu].STLB.stlb_non_compulsory_rrc_footprint[b][r][fp];
+				csv << '\n';
+			}
+		}
 
 		uint64_t ptes_per_page = PAGE_SIZE / 8;
 		uint64_t log2_ptes = lg2(ptes_per_page);
@@ -470,6 +493,21 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 		cout << "STLB NON-COMPULSORY TRACKED TOTAL: " << cache->stlb_non_compulsory_tracked
 		     << " DRAM BOUND TRACKED: " << cache->stlb_non_compulsory_tracked_dram_bound
 		     << " LLC BOUND TRACKED: " << cache->stlb_non_compulsory_tracked_llc_bound << endl;
+		double avg_ptw_cycles = (cache->total_ptw_count == 0) ? 0.0 : ((double)cache->total_ptw_cycles / cache->total_ptw_count);
+		cout << "STLB TOTAL PAGE WALK CYCLES: " << cache->total_ptw_cycles
+		     << " PAGE WALKS: " << cache->total_ptw_count
+		     << " AVG PAGE WALK CYCLES: " << avg_ptw_cycles << endl;
+		const char* stlb_bound_names[3] = {"L2 BOUND", "LLC BOUND", "DRAM BOUND"};
+		const char* stlb_rrc_labels[7] = {"0", "1", "2", "4", "8", "16", "32"};
+		for (int b = 0; b < 3; ++b) {
+			cout << "STLB NON-COMPULSORY RRC x FOOTPRINT (" << stlb_bound_names[b] << ", cols=footprint 1.." << STLB_PTES_PER_BLOCK << "):" << endl;
+			for (int r = 0; r < 7; ++r) {
+				cout << "  rrc" << stlb_rrc_labels[r] << ":";
+				for (int fp = 0; fp < STLB_PTES_PER_BLOCK; ++fp)
+					cout << ' ' << cache->stlb_non_compulsory_rrc_footprint[b][r][fp];
+				cout << endl;
+			}
+		}
 	}
 	if (cache->cache_type == IS_L1D || cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
 		cout << cache->NAME << " PT PTE BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;
@@ -676,6 +714,12 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->stlb_non_compulsory_tracked = 0;
 		cache->stlb_non_compulsory_tracked_dram_bound = 0;
 		cache->stlb_non_compulsory_tracked_llc_bound = 0;
+		cache->total_ptw_cycles = 0;
+		cache->total_ptw_count = 0;
+		for (int b = 0; b < 3; ++b)
+			for (int r = 0; r < 7; ++r)
+				for (int fp = 0; fp < STLB_PTES_PER_BLOCK; ++fp)
+					cache->stlb_non_compulsory_rrc_footprint[b][r][fp] = 0;
 		for (int footprint = 0; footprint < STLB_PTES_PER_BLOCK; ++footprint)
 			cache->stlb_block_footprint[footprint] = 0;
 		for (int i = 0; i <= STLB_PTES_PER_BLOCK; ++i) {
@@ -683,8 +727,11 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 			for (int j = 0; j <= STLB_PTES_PER_BLOCK; ++j) cache->stlb_valid_footprint_matrix[i][j] = 0;
 		}
 		for (uint32_t set = 0; set < cache->NUM_SET; ++set)
-			for (uint32_t way = 0; way < cache->NUM_WAY; ++way)
+			for (uint32_t way = 0; way < cache->NUM_WAY; ++way) {
 				cache->stlb_block[set][way].accessed_mask = 0;
+				cache->stlb_block[set][way].rereference_count = 0;
+				cache->stlb_block[set][way].non_compulsory_hit_where = 0;
+			}
 
 		cache->bpbp[0] = 0;
 		cache->bpbp[1] = 0;
@@ -839,6 +886,74 @@ uint64_t rotr64 (uint64_t n, unsigned int c)
 
 RANDOM champsim_rand(champsim_seed);
 
+uint64_t allocate_or_lookup_pte_oracle(uint32_t cpu, uint64_t va, uint64_t unique_vpage)
+{
+	uint64_t high_bit_mask = rotr64(cpu, lg2(NUM_CPUS));
+	uint64_t unique_va = va | high_bit_mask;
+	uint64_t vpage = unique_vpage | high_bit_mask;
+
+	auto cl_check = unique_cl[cpu].find(unique_va >> LOG2_BLOCK_SIZE);
+	if (cl_check == unique_cl[cpu].end()) {
+		unique_cl[cpu].insert(make_pair(unique_va >> LOG2_BLOCK_SIZE, 0));
+		num_cl[cpu]++;
+	} else {
+		cl_check->second++;
+	}
+
+	auto pr = page_table.find(vpage);
+	if (pr != page_table.end())
+		return pr->second;
+
+	uint8_t swap = 0;
+	if (allocated_pages >= DRAM_PAGES) {
+		uint64_t NRU_vpage = 0;
+		for (pr = page_table.begin(); pr != page_table.end(); pr++) {
+			NRU_vpage = pr->first;
+			if (recent_page.find(NRU_vpage) == recent_page.end())
+				break;
+		}
+		uint64_t mapped_ppage = pr->second;
+		page_table.erase(pr);
+		page_table.insert(make_pair(vpage, mapped_ppage));
+		auto ppage_check = inverse_table.find(mapped_ppage);
+		if (ppage_check != inverse_table.end())
+			ppage_check->second = vpage;
+		page_queue.pop();
+		page_queue.push(vpage);
+		swap = 1;
+	} else {
+		uint8_t fragmented = 0;
+		uint64_t random_ppage;
+		if (num_adjacent_page > 0)
+			random_ppage = ++previous_ppage;
+		else {
+			random_ppage = champsim_rand.draw_rand();
+			fragmented = 1;
+		}
+		while (inverse_table.find(random_ppage) != inverse_table.end()) {
+			if (num_adjacent_page > 0)
+				fragmented = 1;
+			random_ppage = champsim_rand.draw_rand();
+		}
+		page_table.insert(make_pair(vpage, random_ppage));
+		inverse_table.insert(make_pair(random_ppage, vpage));
+		page_queue.push(vpage);
+		previous_ppage = random_ppage;
+		num_adjacent_page--;
+		num_page[cpu]++;
+		allocated_pages++;
+		if (fragmented)
+			num_adjacent_page = 1 << (rand() % 10);
+	}
+
+	if (swap)
+		major_fault[cpu]++;
+	else
+		minor_fault[cpu]++;
+
+	return page_table.find(vpage)->second;
+}
+
 void issue_ptw_dram_read(uint32_t cpu, uint64_t address, uint64_t instr_id, uint64_t ip,
 	uint8_t type, uint8_t ptw_level)
 {
@@ -859,6 +974,33 @@ void issue_ptw_dram_read(uint32_t cpu, uint64_t address, uint64_t instr_id, uint
 		uncore.DRAM.add_rq(&packet);
 	else
 		uncore.DRAM.RQ[uncore.DRAM.dram_get_channel(packet.address)].FULL++;
+}
+
+void issue_ptw_traffic_packet(uint32_t cpu, uint64_t address, uint64_t instr_id, uint64_t ip,
+	uint8_t type, uint8_t ptw_level, int target_fill_level)
+{
+	if (target_fill_level <= 0)
+		return;
+
+	PACKET packet;
+	packet.address = address >> LOG2_BLOCK_SIZE;
+	packet.full_addr = address;
+	packet.cpu = cpu;
+	packet.instr_id = instr_id;
+	packet.ip = ip;
+	packet.type = type;
+	packet.is_data = 0;
+	packet.instruction = 0;
+	packet.is_ptw = 1;
+	packet.traffic_only = 1;
+	packet.traffic_target_fill_level = target_fill_level;
+	packet.ptw_level = ptw_level;
+	packet.fill_level = (PTW_START_LEVEL == 1) ? FILL_L1 : FILL_L2;
+	packet.fill_l1d = (PTW_START_LEVEL == 1) ? 1 : 0;
+	packet.event_cycle = current_core_cycle[cpu];
+
+	CACHE &start_cache = (PTW_START_LEVEL == 1) ? ooo_cpu[cpu].L1D : ooo_cpu[cpu].L2C;
+	start_cache.add_rq(&packet);
 }
 
 
@@ -1028,20 +1170,25 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 			cout << " => ppage: " << (pa >> LOG2_PAGE_SIZE) << " vadress: " << unique_va << " paddress: " << pa << dec << endl; });
 
 	int mmu_hit[3] = {0,0,0};
-	uint64_t compare_pml4, compare_pdp, compare_pd;
+	uint64_t compare_pml4 = 0, compare_pdp = 0, compare_pd = 0;
 
 	uint64_t ptes_per_page = PAGE_SIZE / 8;
 	uint64_t log2_ptes = lg2(ptes_per_page);
-	compare_pml4 = vpage >> (3 * log2_ptes);
-	compare_pdp  = vpage >> (2 * log2_ptes);
-	compare_pd   = vpage >> (1 * log2_ptes);
+	int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
+	if (walk_depth >= 2)
+		compare_pml4 = vpage >> ((walk_depth - 1) * log2_ptes);
+	if (walk_depth >= 3)
+		compare_pdp  = vpage >> ((walk_depth - 2) * log2_ptes);
+	if (walk_depth >= 4)
+		compare_pd   = vpage >> ((walk_depth - 3) * log2_ptes);
 
 	ooo_cpu[cpu].STLB.mmu_timer++;
 
-	mmu_hit[0] = ooo_cpu[cpu].STLB.search_pml4(compare_pml4);
-	mmu_hit[1] = ooo_cpu[cpu].STLB.search_pdp(compare_pdp);
-
-	if(LOG2_PAGE_SIZE == 12)
+	if (walk_depth >= 2)
+		mmu_hit[0] = ooo_cpu[cpu].STLB.search_pml4(compare_pml4);
+	if (walk_depth >= 3)
+		mmu_hit[1] = ooo_cpu[cpu].STLB.search_pdp(compare_pdp);
+	if (walk_depth >= 4)
 		mmu_hit[2] = ooo_cpu[cpu].STLB.search_pd(compare_pd);
 
 	if (mmu_hit[2] && iflag)
@@ -1055,11 +1202,13 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 	else 
 		int hw = 0;
 
-	ooo_cpu[cpu].STLB.lru_pml4(ooo_cpu[cpu].STLB.mmu_timer, compare_pml4);
+	if (walk_depth >= 2)
+		ooo_cpu[cpu].STLB.lru_pml4(ooo_cpu[cpu].STLB.mmu_timer, compare_pml4);
 
-	ooo_cpu[cpu].STLB.lru_pdp(ooo_cpu[cpu].STLB.mmu_timer, compare_pdp);
+	if (walk_depth >= 3)
+		ooo_cpu[cpu].STLB.lru_pdp(ooo_cpu[cpu].STLB.mmu_timer, compare_pdp);
 
-	if(LOG2_PAGE_SIZE == 12)
+	if (walk_depth >= 4)
 		ooo_cpu[cpu].STLB.lru_pd(ooo_cpu[cpu].STLB.mmu_timer, compare_pd);
 
 	if (swap){
@@ -1072,10 +1221,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 				ooo_cpu[cpu].STLB.pagetable_pwc_hits[level]++;
 
 		uint64_t cr3 = 0x200000;
-		uint64_t ptes_per_page = PAGE_SIZE / 8;
-		uint64_t log2_ptes = lg2(ptes_per_page);
 		uint64_t pte_mask = ptes_per_page - 1;
-		int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
 
 		uint64_t level_addrs[10];
 		for (int i = 0; i < walk_depth; i++) {
@@ -1103,9 +1249,9 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 
 		int asap = ASAP;
 		int ideal = iflag * IDEAL;
-		PACKET search_packet;
 
 		if (!asap && ideal != 1) {
+			int level_target_fill[10] = {0};
 			for (int lvl = walk_depth - 1; lvl >= 0; --lvl) {
 				int mapped_mmu_idx = -1;
 				if (lvl > 0 && lvl >= walk_depth - 3) {
@@ -1130,6 +1276,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 
 					if (way_read >= 0) {
 						if (lvl == 0) search_packet.hit_where = 1;
+						level_target_fill[lvl] = FILL_L1;
 						ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, addr, stat_idx);
 						ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][0]++;
 						if (!magic) {
@@ -1166,6 +1313,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 								if (is_non_compulsory)
 									ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_l2_hits++;
 							}
+							level_target_fill[lvl] = FILL_L2;
 							ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, addr, stat_idx);
 							ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][1]++;
 							if (!magic) {
@@ -1204,19 +1352,22 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 									if (is_non_compulsory)
 										ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_llc_hits++;
 								}
+								level_target_fill[lvl] = FILL_LLC;
 								uncore.LLC.mark_translation_access(set, way_read, addr, stat_idx);
 								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][2]++;
 								if (!magic) {
 									uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
 									uncore.LLC.block[set][way_read].used = 1;
 								}
-								if (lvl == 0 && is_non_compulsory && ptw_bound_mode == PTW_BOUND_LLC) {
+								if (lvl == 0 && is_non_compulsory && (ptw_bound_mode & PTW_BOUND_LLC)) {
 									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked++;
 									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_llc_bound++;
 									if (ptw_latency_mode == PTW_LATENCY_STLB) {
 										cstall = 0; // Only STLB_LATENCY (already paid in STLB RQ)
+										level_target_fill[lvl] = 0;
 									} else if (ptw_latency_mode == PTW_LATENCY_L2) {
 										// Only L2C_LATENCY (already added on L2C miss)
+										level_target_fill[lvl] = FILL_L2;
 									} else {
 										cstall += LLC_LATENCY;
 									}
@@ -1231,6 +1382,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 									if (is_non_compulsory)
 										ooo_cpu[cpu].STLB.stlb_non_compulsory_leaf_dram_hits++;
 								}
+								level_target_fill[lvl] = FILL_DRAM;
 
 								if (!magic) {
 									way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, addr, type);
@@ -1250,16 +1402,20 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 								}
 
 								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][3]++;
-								issue_ptw_dram_read(cpu, addr, instr_id, ip, type, stat_idx);
-								if (lvl == 0 && is_non_compulsory && ptw_bound_mode == PTW_BOUND_DRAM) {
+								if (!knob_traffic_only_packets)
+									issue_ptw_dram_read(cpu, addr, instr_id, ip, type, stat_idx);
+								if (lvl == 0 && is_non_compulsory && (ptw_bound_mode & PTW_BOUND_DRAM)) {
 									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked++;
 									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_dram_bound++;
 									if (ptw_latency_mode == PTW_LATENCY_STLB) {
 										cstall = 0; // Only STLB_LATENCY (already paid in STLB RQ)
+										level_target_fill[lvl] = 0;
 									} else if (ptw_latency_mode == PTW_LATENCY_L2) {
 										// Only L2C_LATENCY (already added on L2C miss)
+										level_target_fill[lvl] = FILL_L2;
 									} else if (ptw_latency_mode == PTW_LATENCY_L2_LLC) {
 										cstall += LLC_LATENCY;
+										level_target_fill[lvl] = FILL_LLC;
 									} else {
 										cstall += LLC_LATENCY + 200;
 									}
@@ -1271,17 +1427,30 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 					}
 				}
 			}
+
+			if (knob_traffic_only_packets && !magic && cstall > 0) {
+				for (int lvl = walk_depth - 1; lvl >= 0; --lvl) {
+					if (level_target_fill[lvl] > 0) {
+						issue_ptw_traffic_packet(cpu, level_addrs[lvl], instr_id, ip, type, (walk_depth - 1) - lvl, level_target_fill[lvl]);
+					}
+				}
+			}
 		}
 		if (PAGE_TABLE_LATENCY != 0){
 			if(magic != 2 && ideal != 1)
 				stall_cycle[cpu] = current_core_cycle[cpu] + cstall;
 
 		}
+		if (!magic) {
+			ooo_cpu[cpu].STLB.total_ptw_cycles += cstall;
+			ooo_cpu[cpu].STLB.total_ptw_count++;
+		}
 	}
 	VA_TO_PA_RESULT res;
 	res.pa = pa;
 	res.cstall = cstall;
 	res.hit_where = search_packet.hit_where;
+	res.is_non_compulsory = is_non_compulsory ? 1 : 0;
 	return res;
 }
 
@@ -1328,19 +1497,25 @@ uint64_t va_to_pa_prefetch(uint32_t cpu, uint64_t va, uint64_t unique_vpage){
 int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t instr_id, uint64_t ip, int type, int iflag){
 
 	int mmu_hit[3] = {0,0,0};
-	uint64_t compare_pml4, compare_pdp, compare_pd;
+	uint64_t compare_pml4 = 0, compare_pdp = 0, compare_pd = 0;
 	uint64_t ptes_per_page = PAGE_SIZE / 8;
 	uint64_t log2_ptes = lg2(ptes_per_page);
-	compare_pml4 = vpage >> (3 * log2_ptes);
-	compare_pdp  = vpage >> (2 * log2_ptes);
-	compare_pd   = vpage >> (1 * log2_ptes);
+	int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
+	if (walk_depth >= 2)
+		compare_pml4 = vpage >> ((walk_depth - 1) * log2_ptes);
+	if (walk_depth >= 3)
+		compare_pdp  = vpage >> ((walk_depth - 2) * log2_ptes);
+	if (walk_depth >= 4)
+		compare_pd   = vpage >> ((walk_depth - 3) * log2_ptes);
 
 	uint64_t cstall = 2;
 	ooo_cpu[cpu].STLB.mmu_timer++;
 
-	mmu_hit[0] = ooo_cpu[cpu].STLB.search_pml4(compare_pml4);
-	mmu_hit[1] = ooo_cpu[cpu].STLB.search_pdp(compare_pdp);
-	if(LOG2_PAGE_SIZE == 12)
+	if (walk_depth >= 2)
+		mmu_hit[0] = ooo_cpu[cpu].STLB.search_pml4(compare_pml4);
+	if (walk_depth >= 3)
+		mmu_hit[1] = ooo_cpu[cpu].STLB.search_pdp(compare_pdp);
+	if (walk_depth >= 4)
 		mmu_hit[2] = ooo_cpu[cpu].STLB.search_pd(compare_pd);
 
 	if (mmu_hit[2] && iflag)
@@ -1355,16 +1530,15 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 		int unknown = 0;
 
 	if (swap == 0){
-		ooo_cpu[cpu].STLB.lru_pml4(ooo_cpu[cpu].STLB.mmu_timer, compare_pml4);
-		ooo_cpu[cpu].STLB.lru_pdp(ooo_cpu[cpu].STLB.mmu_timer, compare_pdp);
-		if(LOG2_PAGE_SIZE == 12)
+		if (walk_depth >= 2)
+			ooo_cpu[cpu].STLB.lru_pml4(ooo_cpu[cpu].STLB.mmu_timer, compare_pml4);
+		if (walk_depth >= 3)
+			ooo_cpu[cpu].STLB.lru_pdp(ooo_cpu[cpu].STLB.mmu_timer, compare_pdp);
+		if (walk_depth >= 4)
 			ooo_cpu[cpu].STLB.lru_pd(ooo_cpu[cpu].STLB.mmu_timer, compare_pd);
 
 		uint64_t cr3 = 0x200000;
-		uint64_t ptes_per_page = PAGE_SIZE / 8;
-		uint64_t log2_ptes = lg2(ptes_per_page);
 		uint64_t pte_mask = ptes_per_page - 1;
-		int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
 
 		uint64_t level_addrs[10];
 		for (int i = 0; i < walk_depth; i++) {
@@ -1495,6 +1669,9 @@ int main(int argc, char** argv)
 			{"latency", required_argument, 0, 'L'},
 			{"latency_mode", required_argument, 0, 'L'},
 			{"ptw_latency", required_argument, 0, 'L'},
+			{"traffic_only_packets", required_argument, 0, 'T'},
+			{"ptw_traffic_packets", required_argument, 0, 'T'},
+			{"stlb_oracle", required_argument, 0, 'O'},
 			{"flush_on_end", required_argument, 0, 'F'},
 			{"page_size", required_argument, 0, 'p'},
 			{0, 0, 0, 0}      
@@ -1542,18 +1719,32 @@ int main(int argc, char** argv)
 					return 1;
 				}
 				break;
-			case 'B':
-				if (strcasecmp(optarg, "none") == 0)
-					ptw_bound_mode = PTW_BOUND_NONE;
-				else if (strcasecmp(optarg, "dram") == 0)
-					ptw_bound_mode = PTW_BOUND_DRAM;
-				else if (strcasecmp(optarg, "llc") == 0)
-					ptw_bound_mode = PTW_BOUND_LLC;
-				else {
-					cerr << "Invalid --bound (expected none, dram, or llc): " << optarg << endl;
-					return 1;
+			case 'B': {
+				char *arg_copy = strdup(optarg);
+				char *token = strtok(arg_copy, ",+ \t");
+				int parsed_bound = 0;
+				bool valid = true;
+				while (token != NULL) {
+					if (strcasecmp(token, "none") == 0) {
+						// no-op or clear if alone
+					} else if (strcasecmp(token, "dram") == 0) {
+						parsed_bound |= PTW_BOUND_DRAM;
+					} else if (strcasecmp(token, "llc") == 0) {
+						parsed_bound |= PTW_BOUND_LLC;
+					} else if (strcasecmp(token, "all") == 0) {
+						parsed_bound |= PTW_BOUND_ALL;
+					} else {
+						cerr << "Invalid --bound token (expected none, dram, llc, or combination like llc,dram): " << token << endl;
+						valid = false;
+						break;
+					}
+					token = strtok(NULL, ",+ \t");
 				}
+				free(arg_copy);
+				if (!valid) return 1;
+				ptw_bound_mode = (PTW_BOUND_MODE)parsed_bound;
 				break;
+			}
 			case 'L':
 				if (strcasecmp(optarg, "none") == 0)
 					ptw_latency_mode = PTW_LATENCY_NONE;
@@ -1568,6 +1759,12 @@ int main(int argc, char** argv)
 					return 1;
 				}
 				break;
+			case 'T':
+				knob_traffic_only_packets = (strcasecmp(optarg, "true") == 0 || strcasecmp(optarg, "on") == 0 || strcasecmp(optarg, "yes") == 0) ? 1 : atoi(optarg);
+				break;
+			case 'O':
+				knob_stlb_oracle = (strcasecmp(optarg, "true") == 0 || strcasecmp(optarg, "on") == 0 || strcasecmp(optarg, "yes") == 0) ? 1 : atoi(optarg);
+				break;
 			case 'F':
 				knob_flush_on_end = atoi(optarg);
 				break;
@@ -1580,12 +1777,12 @@ int main(int argc, char** argv)
 			break;
 	}
 
-	if (ptw_bound_mode == PTW_BOUND_DRAM && ptw_latency_mode != PTW_LATENCY_STLB && ptw_latency_mode != PTW_LATENCY_L2 && ptw_latency_mode != PTW_LATENCY_L2_LLC) {
-		cerr << "Invalid configuration: when bound is DRAM, latency must be STLB, L2, or L2+LLC" << endl;
+	if ((ptw_bound_mode & PTW_BOUND_DRAM) && ptw_latency_mode != PTW_LATENCY_STLB && ptw_latency_mode != PTW_LATENCY_L2 && ptw_latency_mode != PTW_LATENCY_L2_LLC) {
+		cerr << "Invalid configuration: when bound includes DRAM, latency must be STLB, L2, or L2+LLC" << endl;
 		return 1;
 	}
-	if (ptw_bound_mode == PTW_BOUND_LLC && ptw_latency_mode != PTW_LATENCY_STLB && ptw_latency_mode != PTW_LATENCY_L2) {
-		cerr << "Invalid configuration: when bound is LLC, latency must be STLB or L2" << endl;
+	if ((ptw_bound_mode & PTW_BOUND_LLC) && !(ptw_bound_mode & PTW_BOUND_DRAM) && ptw_latency_mode != PTW_LATENCY_STLB && ptw_latency_mode != PTW_LATENCY_L2) {
+		cerr << "Invalid configuration: when bound is only LLC, latency must be STLB or L2" << endl;
 		return 1;
 	}
 
@@ -1613,8 +1810,17 @@ int main(int argc, char** argv)
 	cout << "stlb_latency: " << STLB_LATENCY << endl;
 	cout << "stlb_ptes_per_block: " << STLB_PTES_PER_BLOCK << endl;
 	cout << "stlb_block_mode: " << (stlb_block_mode == STLB_BLOCK_SPARSITY ? "sparsity" : (stlb_block_mode == STLB_BLOCK_DETAIL ? "detail" : (stlb_block_mode == STLB_BLOCK_ANALYSIS ? "analysis" : "default"))) << endl;
-	cout << "bound: " << (ptw_bound_mode == PTW_BOUND_DRAM ? "dram" : (ptw_bound_mode == PTW_BOUND_LLC ? "llc" : "none")) << endl;
+	string bound_str = "none";
+	if ((ptw_bound_mode & PTW_BOUND_DRAM) && (ptw_bound_mode & PTW_BOUND_LLC))
+		bound_str = "llc,dram";
+	else if (ptw_bound_mode & PTW_BOUND_DRAM)
+		bound_str = "dram";
+	else if (ptw_bound_mode & PTW_BOUND_LLC)
+		bound_str = "llc";
+	cout << "bound: " << bound_str << endl;
 	cout << "latency: " << (ptw_latency_mode == PTW_LATENCY_L2_LLC ? "l2+llc" : (ptw_latency_mode == PTW_LATENCY_L2 ? "l2" : (ptw_latency_mode == PTW_LATENCY_STLB ? "stlb" : "none"))) << endl;
+	cout << "traffic_only_packets: " << +knob_traffic_only_packets << endl;
+	cout << "stlb_oracle: " << +knob_stlb_oracle << endl;
 	cout << "l1i_set: " << L1I_SET << endl;
 	cout << "l1i_way: " << L1I_WAY << endl;
 	cout << "l1i_latency: " << L1I_LATENCY << endl;
