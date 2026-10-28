@@ -113,6 +113,8 @@ uint64_t allocate_or_lookup_pte_oracle(uint32_t cpu, uint64_t va, uint64_t uniqu
 // block. Supported values are powers of two so VPN decomposition is cheap.
 #define STLB_PTES_PER_BLOCK 1
 
+#include "sector_analysis.h"
+
 // L1 INSTRUCTION CACHE
 #define L1I_SET 64
 #define L1I_WAY 8
@@ -205,6 +207,7 @@ class CACHE : public MEMORY {
 		uint64_t total_ptw_count;
 		// [bound: 0=L2, 1=LLC, 2=DRAM][rrc: 0=rrc0, 1..6=rrc1..32+][footprint - 1: 0..STLB_PTES_PER_BLOCK-1]
 		uint64_t stlb_non_compulsory_rrc_footprint[3][7][STLB_PTES_PER_BLOCK];
+		SectorTracker sector_tracker;
 		uint64_t translation_valid_entries_on_eviction[9];
 		uint64_t translation_valid_footprint_matrix[9][9]; // [valid][footprint] (footprint: 0..8)
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
@@ -365,6 +368,7 @@ class CACHE : public MEMORY {
 				stlb_non_compulsory_tracked_llc_bound = 0;
 				total_ptw_cycles = 0;
 				total_ptw_count = 0;
+				sector_tracker.reset();
 				for (int b = 0; b < 3; ++b)
 					for (int r = 0; r < 7; ++r)
 						for (int fp = 0; fp < STLB_PTES_PER_BLOCK; ++fp)

@@ -2132,6 +2132,7 @@ void CACHE::handle_fill()
 			const uint32_t bound_idx = entry.non_compulsory_hit_where - 2; // 0: L2, 1: LLC, 2: DRAM
 			const uint32_t rrc_idx = entry.rereference_count ? (1 + rrc_bucket(entry.rereference_count)) : 0;
 			stlb_non_compulsory_rrc_footprint[bound_idx][rrc_idx][footprint - 1]++;
+			sector_tracker.record_completed_residency(entry.tag, entry.rereference_count, footprint, entry.non_compulsory_hit_where);
 		}
 
 		entry.accessed_mask = 0;

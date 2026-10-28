@@ -178,6 +178,8 @@ void write_csv_stats()
 			}
 		}
 
+		ooo_cpu[cpu].STLB.sector_tracker.print_csv_stats(csv, cpu);
+
 		uint64_t ptes_per_page = PAGE_SIZE / 8;
 		uint64_t log2_ptes = lg2(ptes_per_page);
 		int walk_depth = (48 - LOG2_PAGE_SIZE + log2_ptes - 1) / log2_ptes;
@@ -508,6 +510,7 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 				cout << endl;
 			}
 		}
+		cache->sector_tracker.print_stats(cout, cpu);
 	}
 	if (cache->cache_type == IS_L1D || cache->cache_type == IS_L2C || cache->cache_type == IS_LLC) {
 		cout << cache->NAME << " PT PTE BLOCK EVICTIONS: " << cache->footprint_evictions[3] << endl;
@@ -716,6 +719,7 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->stlb_non_compulsory_tracked_llc_bound = 0;
 		cache->total_ptw_cycles = 0;
 		cache->total_ptw_count = 0;
+		cache->sector_tracker.reset();
 		for (int b = 0; b < 3; ++b)
 			for (int r = 0; r < 7; ++r)
 				for (int fp = 0; fp < STLB_PTES_PER_BLOCK; ++fp)
@@ -1029,6 +1033,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 			ooo_cpu[cpu].STLB.vpn_history.insert(unique_vpage);
 			ooo_cpu[cpu].STLB.stlb_compulsory_misses++;
 		}
+		ooo_cpu[cpu].STLB.sector_tracker.record_miss(unique_vpage, is_non_compulsory);
 	}
 
 	// smart random number generator
@@ -1444,6 +1449,9 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 		if (!magic) {
 			ooo_cpu[cpu].STLB.total_ptw_cycles += cstall;
 			ooo_cpu[cpu].STLB.total_ptw_count++;
+			if (search_packet.hit_where >= 2 && search_packet.hit_where <= 4) {
+				ooo_cpu[cpu].STLB.sector_tracker.record_fill_source(unique_vpage, search_packet.hit_where);
+			}
 		}
 	}
 	VA_TO_PA_RESULT res;
