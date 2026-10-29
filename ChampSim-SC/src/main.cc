@@ -850,6 +850,20 @@ void print_deadlock(uint32_t i)
 		cout << " fill_level: " << queue->entry[j].fill_level << " lq_index: " << queue->entry[j].lq_index << " sq_index: " << queue->entry[j].sq_index << endl; 
 	}
 
+	PACKET_QUEUE *dtlb_queues[] = {&ooo_cpu[i].DTLB.RQ, &ooo_cpu[i].DTLB.MSHR, &ooo_cpu[i].DTLB.PROCESSED,
+	                               &ooo_cpu[i].STLB.RQ, &ooo_cpu[i].STLB.MSHR, &ooo_cpu[i].STLB.PROCESSED};
+	for (auto q : dtlb_queues) {
+		cout << endl << q->NAME << " Entry (occupancy: " << q->occupancy << ")" << endl;
+		for (uint32_t j=0; j<q->SIZE; j++) {
+			if (q->entry[j].instr_id != 0 || q->entry[j].address != 0) {
+				cout << "[" << q->NAME << "] entry: " << j << " instr_id: " << q->entry[j].instr_id << " rob_index: " << q->entry[j].rob_index
+				     << " address: " << hex << q->entry[j].address << " full_addr: " << q->entry[j].full_addr << dec << " type: " << +q->entry[j].type
+				     << " event_cycle: " << q->entry[j].event_cycle << " returned: " << +q->entry[j].returned
+				     << " fill_level: " << q->entry[j].fill_level << " lq_index: " << q->entry[j].lq_index << " sq_index: " << q->entry[j].sq_index << endl;
+			}
+		}
+	}
+
 	assert(0);
 }
 

@@ -1,3 +1,4 @@
+#include "cache.h"
 #include "sector_analysis.h"
 #include <algorithm>
 

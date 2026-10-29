@@ -11,7 +11,7 @@
 #include "champsim.h"
 
 #ifndef STLB_PTES_PER_BLOCK
-#define STLB_PTES_PER_BLOCK 4
+#error "STLB_PTES_PER_BLOCK must be defined before including sector_analysis.h"
 #endif
 
 // Forward declaration of rrc_bucket helper (shared with cache.cc)
