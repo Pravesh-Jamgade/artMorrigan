@@ -1,6 +1,7 @@
 #include "ooo_cpu.h"
 // #include "cache.h"
 #include "set.h"
+#include "lamp.h"
 
 // out-of-order core
 O3_CPU ooo_cpu[NUM_CPUS]; 
@@ -629,7 +630,7 @@ void O3_CPU::fetch_instruction()
 			else
 				trace_packet.address = IFETCH_BUFFER.entry[index].ip >> LOG2_PAGE_SIZE;
 			trace_packet.full_addr = IFETCH_BUFFER.entry[index].ip;
-			trace_packet.instr_id = 0;
+			trace_packet.instr_id = IFETCH_BUFFER.entry[index].instr_id;
 			trace_packet.rob_index = i;
 			trace_packet.producer = 0; // TODO: check if this guy gets used or not
 			trace_packet.ip = IFETCH_BUFFER.entry[index].ip;
@@ -1738,6 +1739,8 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
 {
 	SQ.entry[sq_index].fetched = COMPLETED;
 	SQ.entry[sq_index].event_cycle = current_core_cycle[cpu];
+	// LAMP: Record end-to-end completion cycle for stores that experienced a DTLB/STLB translation miss
+	lamp_system.record_load_completion(cpu, SQ.entry[sq_index].instr_id, current_core_cycle[cpu]);
 
 	ROB.entry[rob_index].num_mem_ops--;
 	ROB.entry[rob_index].event_cycle = current_core_cycle[cpu];
@@ -1957,6 +1960,8 @@ void O3_CPU::complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 			{
 				IFETCH_BUFFER.entry[j].translated = COMPLETED;
 				IFETCH_BUFFER.entry[j].fetched = COMPLETED;
+				// LAMP: Record end-to-end instruction fetch completion cycle for fetches that missed in ITLB/STLB
+				lamp_system.record_ifetch_completion(cpu, IFETCH_BUFFER.entry[j].instr_id, current_core_cycle[cpu]);
 			}
 		}
 
@@ -2085,6 +2090,8 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 #endif
 			LQ.entry[lq_index].fetched = COMPLETED;
 			LQ.entry[lq_index].event_cycle = current_core_cycle[cpu];
+			// LAMP: Record end-to-end load completion cycle when L1D demand fill completes
+			lamp_system.record_load_completion(cpu, LQ.entry[lq_index].instr_id, current_core_cycle[cpu]);
 			ROB.entry[rob_index].num_mem_ops--;
 			ROB.entry[rob_index].event_cycle = queue->entry[index].event_cycle;
 
@@ -2179,6 +2186,8 @@ void O3_CPU::handle_o3_fetch(PACKET *current_packet, uint32_t cache_type)
 				assert(0);
 #endif
 			LQ.entry[lq_index].fetched = COMPLETED;
+			// LAMP: Record end-to-end load completion cycle for O3 L1D fetch completion
+			lamp_system.record_load_completion(cpu, LQ.entry[lq_index].instr_id, current_core_cycle[cpu]);
 			ROB.entry[rob_index].num_mem_ops--;
 
 #ifdef SANITY_CHECK
@@ -2254,6 +2263,8 @@ void O3_CPU::handle_merged_load(PACKET *provider)
 
 		LQ.entry[merged].fetched = COMPLETED;
 		LQ.entry[merged].event_cycle = current_core_cycle[cpu];
+		// LAMP: Record end-to-end load completion cycle for merged LQ entries woken by L1D fill
+		lamp_system.record_load_completion(cpu, LQ.entry[merged].instr_id, current_core_cycle[cpu]);
 		ROB.entry[merged_rob_index].num_mem_ops--;
 		ROB.entry[merged_rob_index].event_cycle = current_core_cycle[cpu];
 

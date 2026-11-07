@@ -82,3 +82,5 @@ define make-depend
         $(CFlags) \
         $1
 endef
+
+-include $(objects:.o=.d)

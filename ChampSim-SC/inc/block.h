@@ -32,6 +32,15 @@ class BLOCK {
 			 rereference_count,
 			 translation_rereference_count;
 
+		// ---------------------------------------------------------------------
+		// LAMP (Leaf-PTE Accelerated Memory Pathfinder) Cache Block Fields
+		// ---------------------------------------------------------------------
+		uint64_t pte_group,       // Virtual Page Group ID (VPN >> 3) for VA-tagged matching
+			 cr3_or_asid,     // Address space identifier (CR3 / cpu ASID) for process isolation
+			 leaf_ptes[8];    // Eight 8-byte translated leaf PTE physical page numbers (PPNs)
+		uint8_t  is_leaf_pte,     // 1 if this 64-byte cache block holds a VA-tagged group of leaf PTEs
+			 leaf_pte_valid;  // 8-bit bitmap indicating which of the 8 leaf PTE slots are valid
+
 		// replacement state
 		uint32_t lru;
 
@@ -43,6 +52,12 @@ class BLOCK {
 			ptw_level = UINT8_MAX;
 			translation_footprint = 0;
 			translation_rereference_count = 0;
+			is_leaf_pte = 0;               // LAMP: Initialize leaf-PTE block flag to 0 (non-PTE line)
+			leaf_pte_valid = 0;            // LAMP: Initialize 8-slot valid bitmap to 0 (no valid PTE slots)
+			pte_group = 0;                 // LAMP: Initialize VA group tag (VPN >> 3) to 0
+			cr3_or_asid = 0;               // LAMP: Initialize address space identifier (CR3/ASID) to 0
+			for (int i = 0; i < 8; ++i)
+				leaf_ptes[i] = 0;          // LAMP: Clear all 8 leaf-PTE physical page number (PPN) slots
 			for (int i = 0; i < 3; ++i)
 				access_footprint[i] = 0;
 
@@ -141,7 +156,19 @@ class PACKET {
 				  cycle_enqueued,
 				  stall_cycles;
 
+			 // -----------------------------------------------------------------
+			 // LAMP (Leaf-PTE Accelerated Memory Pathfinder) Packet Fields
+			 // -----------------------------------------------------------------
+			 uint64_t trans_id;       // Shared 64-bit transaction ID synchronizing LAMP and PTW paths
+			 uint8_t  is_lamp,        // 1 if this memory packet belongs to the speculative LAMP path
+				  is_losing_path, // 1 if this packet belongs to the losing path marked for cancellation
+				  canceled;       // 1 if this packet has been officially aborted prior to servicing
+
 			 PACKET() {
+				 trans_id = 0;             // LAMP: Default 0 (not bound to a parallel translation transaction)
+				 is_lamp = 0;              // LAMP: Default 0 (conventional packet, not a speculative LAMP probe)
+				 is_losing_path = 0;       // LAMP: Default 0 (not flagged as a losing-path request)
+				 canceled = 0;             // LAMP: Default 0 (not aborted)
 				 instruction = 0;
 				 is_data = 1;
 				 is_ptw = 0;

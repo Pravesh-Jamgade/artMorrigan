@@ -1014,127 +1014,8 @@ void CACHE::handle_fill()
 							if (lower_level)
 								lower_level->add_rq(&RQ.entry[index]);
 							else {
-								if (cache_type == IS_STLB) {
-									if (stlb_block_mode == STLB_BLOCK_ANALYSIS) {
-										uint64_t ignored_ppn;
-										PACKET entry = RQ.entry[index];
-										if (stlb_block_lookup(entry.address, (entry.full_addr ? entry.full_addr : entry.address), &ignored_ppn))
-											stlb_block_hits++;
-										else
-											stlb_block_misses++;
-									}
-									uint64_t pa, current_vpn = RQ.entry[index].address;
-									int bits, rowhit=-1, victim, iflag = 0;
-									pair<int, int> answer;
-
-									int * free_indexes;
-									free_indexes = sorted_free_distances();
-
-									if(unsigned(RQ.entry[index].instruction) != 0){
-										stlb_misses[1]++;
-										iflag = 1;
-										decay_timer++;
-										decay_conf_timer++;
-									}
-									else{
-										stlb_misses[0]++;
-									}
-
-									int fctb_found_pos = -10;
-									if(iflag == 1){
-										refresh_fctb(current_core_cycle[read_cpu]);
-										fctb_found_pos = search_fctb(RQ.entry[index].address);
-										answer = check_hit_stlb_pq(RQ.entry[index].address);
-									}
-									else{
-										answer = make_pair(-1,-1);
-									}
-
-									VA_TO_PA_RESULT v2p;
-									if(answer.first == -1){
-										if(iflag){
-											if(fctb_found_pos == -10){
-												v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
-												pa = v2p.pa;
-												RQ.entry[index].hit_where = v2p.hit_where;
-												RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
-												int victim_entry = fctb_replacement_policy();
-												fctb[victim_entry][0] = current_vpn;
-												fctb[victim_entry][1] = (RQ.entry[index].full_addr & 0x7000)/4096;
-												fctb[victim_entry][2] = current_core_cycle[read_cpu];
-												fctb[victim_entry][3] = v2p.cstall;
-
-											}
-											else{
-												pa = va_to_pa_prefetch(read_cpu, RQ.entry[index].full_addr, RQ.entry[index].address);
-												if(pa == 0){
-													v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
-													pa = v2p.pa;
-													RQ.entry[index].hit_where = v2p.hit_where;
-													RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
-												}
-											}
-										}
-										else{
-											v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, RQ.entry[index].full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
-											pa  = v2p.pa;
-											RQ.entry[index].hit_where = v2p.hit_where;
-											RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
-										}
-										if (iflag == 1)
-											pf_misses_pq++;
-									}
-									else{
-										if(PQ.entry[answer.first].free_bit == 1 && PQ.entry[answer.first].free_distance != 0){
-											rfhits[1]++;
-											free_hits[PQ.entry[answer.first].free_distance + 6 + (PQ.entry[answer.first].free_distance < 0)*1]++;
-										}
-										else
-											rfhits[0]++;
-
-										if (warmup_complete[cpu]){
-											uint64_t num_cycles;
-
-											if(PQ.entry[answer.first].irip)
-												irip_hits++;
-											else
-												sdp_hits++;
-
-											if(answer.second == 0){
-												num_cycles = current_core_cycle[read_cpu] - PQ.return_event_cycle(answer.first);
-												if (num_cycles < PQ.entry[answer.first].stall_cycles){
-													add_stall_prefetch(PQ.entry[answer.first].stall_cycles - num_cycles, read_cpu);
-												}
-											}
-											else{
-												cout << "you should not be here since we are using only one PQ" << endl;
-											}
-										}
-
-										if(answer.second == 0){
-											pa = PQ.entry[answer.first].data;
-											if(PQ.entry[answer.first].lad == 1)
-												hit_prefetches_lad++;
-											PQ.remove_queue_prefetch(&PQ.entry[answer.first], answer.first);
-										}
-										else{
-											cout << "you should not be here since we are using only one PQ" << endl;
-										}
-
-										pf_hits_pq++;
-
-									}
-
-									vpn_history.insert(current_vpn);
-									RQ.entry[index].data = pa >> LOG2_PAGE_SIZE; 
-									RQ.entry[index].event_cycle = current_core_cycle[read_cpu];
-									return_data(&RQ.entry[index]);
-
-									if(iflag == 1){
-										free_indexes = sorted_free_distances();
-										stlb_prefetcher_operate(RQ.entry[index].address, RQ.entry[index].ip, 0, RQ.entry[index].type, answer.first, warmup_complete[cpu], free_indexes, RQ.entry[index].instr_id, iflag);
-										stlb_prefetcher_cache_fill(RQ.entry[index].address, 0, 0, 0, 0);
-									}
+								if (cache_type == IS_STLB || cache_type == IS_ITLB || cache_type == IS_DTLB) {
+									handle_translation_miss(index);
 								}
 							}
 						}
@@ -1540,6 +1421,14 @@ void CACHE::handle_fill()
 		BLOCK &victim = block[set][way];
 		if (!victim.valid)
 			return;
+
+		// LAMP: If an L1D (when PTW_START_LEVEL == 1), L2C, or LLC cache block being evicted holds a VA-tagged leaf-PTE line,
+		// increment the core's leaf-PTE eviction counter (lamp_pte_evictions)
+		if ((cache_type == IS_L2C || cache_type == IS_LLC || (PTW_START_LEVEL == 1 && cache_type == IS_L1D)) && victim.is_leaf_pte) {
+			if (victim.cpu < lamp_system.stats.size())
+				lamp_system.stats[victim.cpu].lamp_pte_evictions++;
+		}
+
 		uint8_t masks[4] = {victim.access_footprint[LOAD], victim.access_footprint[RFO],
 			victim.access_footprint[PREFETCH], victim.translation_footprint};
 		for (uint32_t type = 0; type < 4; ++type) {
@@ -1576,7 +1465,7 @@ void CACHE::handle_fill()
 						valid_count++;
 				}
 				if (valid_count == 0 && translation_entries > 0) {
-					std::cout << "VALID_COUNT_0 pte_address=" << std::hex << pte_address << " base_pt_offset=" << base_pt_offset << " base_vpage=" << base_vpage << std::dec << "\n";
+					valid_count_zero_events++;
 				}
 				translation_valid_entries_on_eviction[valid_count]++;
 				translation_valid_footprint_matrix[valid_count][translation_entries]++;
@@ -1607,6 +1496,14 @@ void CACHE::handle_fill()
 		victim.translation_rereference_count = 0;
 		for (uint32_t type = 0; type < 3; ++type)
 			victim.access_footprint[type] = 0;
+		// LAMP: Clear all leaf-PTE metadata fields on the evicted cache block so a subsequent
+		// data fill into this way does not inherit stale leaf-PTE tags or valid bitmaps
+		victim.is_leaf_pte = 0;
+		victim.pte_group = 0;
+		victim.cr3_or_asid = 0;
+		victim.leaf_pte_valid = 0;
+		for (int i = 0; i < 8; ++i)
+			victim.leaf_ptes[i] = 0;
 	}
 
 	void CACHE::flush_stat_counters()
@@ -2270,6 +2167,27 @@ void CACHE::handle_fill()
 		for (uint32_t type = 0; type < 3; ++type)
 			block[set][way].access_footprint[type] = 0;
 		block[set][way].rereference_count = 0;
+		// LAMP: If this cache fill is bringing back a data block that was previously displaced
+		// by a leaf-PTE fill, remove it from the displaced set and count a pollution miss on demandLOAD/RFO
+		if (packet->cpu < lamp_system.stats.size()) {
+			bool was_displaced = false;
+			if (cache_type == IS_L1D)
+				was_displaced = (lamp_system.stats[packet->cpu].displaced_data_l1d.erase(packet->address) > 0);
+			else if (cache_type == IS_L2C)
+				was_displaced = (lamp_system.stats[packet->cpu].displaced_data_l2c.erase(packet->address) > 0);
+			else if (cache_type == IS_LLC)
+				was_displaced = (lamp_system.stats[packet->cpu].displaced_data_llc.erase(packet->address) > 0);
+			if (was_displaced && (packet->type == LOAD || packet->type == RFO))
+				lamp_system.stats[packet->cpu].lamp_pollution_misses++;
+		}
+
+		// LAMP: Reset leaf-PTE metadata when a normal cache fill overwrites this cache block
+		block[set][way].is_leaf_pte = 0;
+		block[set][way].pte_group = 0;
+		block[set][way].cr3_or_asid = 0;
+		block[set][way].leaf_pte_valid = 0;
+		for (int i = 0; i < 8; ++i)
+			block[set][way].leaf_ptes[i] = 0;
 		mark_cache_access(set, way, packet->type, packet->full_addr, false);
 
 		if (block[set][way].prefetch)
@@ -3023,13 +2941,31 @@ void CACHE::handle_fill()
 		// check MSHR information
 		int mshr_index = check_mshr(packet);
 
-		// sanity check
+		// ---------------------------------------------------------------------
+		// Cancellation-Aware Callback & MSHR Conflict Resolution
+		// ---------------------------------------------------------------------
+		// When LAMP and PTW race, the winning path completes translation and frees
+		// the TLB miss MSHR. Later callbacks or in-flight packets from the losing
+		// path arriving here will find no active MSHR (mshr_index == -1).
+		// Instead of crashing with assert(0), we recognize this as an expected
+		// canceled response, safely increment late_responses_ignored, and return.
 		if (mshr_index == -1) {
+			if (lamp_system.is_canceled_or_late_response(packet)) {
+				lamp_system.record_late_response_ignored(packet->cpu, packet);
+				return;
+			}
 			cerr << "[" << NAME << "_MSHR] " << __func__ << " instr_id: " << packet->instr_id << " cannot find a matching entry!";
 			cerr << " full_addr: " << hex << packet->full_addr;
 			cerr << " address: " << packet->address << dec;
 			cerr << " event: " << packet->event_cycle << " current: " << current_core_cycle[packet->cpu] << endl;
 			assert(0);
+		}
+
+		// Prevent late responses from operating on a newly allocated MSHR entry
+		// that reused the same index for a different translation transaction.
+		if (packet->trans_id != 0 && MSHR.entry[mshr_index].trans_id != 0 && MSHR.entry[mshr_index].trans_id != packet->trans_id) {
+			lamp_system.record_late_response_ignored(packet->cpu, packet);
+			return;
 		}
 
 		// MSHR holds the most updated information about this request
@@ -3187,4 +3123,168 @@ void CACHE::handle_fill()
 	void CACHE::increment_WQ_FULL(uint64_t address)
 	{
 		WQ.FULL++;
+	}
+
+	// =========================================================================
+	// CACHE::handle_translation_miss
+	// Handles translation misses for ITLB, DTLB, and STLB under both LAMP and baseline.
+	// When knob_lamp == 1:
+	//   Runs parallel LAMP lookup (L2/LLC only) against normal PTW walk.
+	//   Arbitrates single-completion winner, adjusts stall latency, and cancels loser.
+	// =========================================================================
+	// CACHE::handle_translation_miss
+	// =========================================================================
+	// Unified translation miss handler for STLB (when knob_stlb == 1) and
+	// L1 ITLB/DTLB (when knob_stlb == 0).
+	// Executes all STLB miss accounting, FCTB lookups, STLB Prefetch Queue (PQ)
+	// checks, and STLB prefetcher hooks identically in both baseline (knob_lamp == 0)
+	// and LAMP (knob_lamp == 1) modes. Leaf-PTE lookup, insertion, and PTW
+	// cancellation for LAMP are performed inside va_to_pa().
+	// =========================================================================
+	void CACHE::handle_translation_miss(uint32_t index)
+	{
+		uint32_t read_cpu = RQ.entry[index].cpu;                                   // Originating CPU core ID for this translation miss
+		uint64_t current_vpn = RQ.entry[index].address;                            // Virtual Page Number (VPN = VA >> 12)
+		uint64_t full_addr = RQ.entry[index].full_addr ? RQ.entry[index].full_addr : (current_vpn << LOG2_PAGE_SIZE); // Full 64-bit virtual address
+		int iflag = (RQ.entry[index].instruction != 0 || cache_type == IS_ITLB) ? 1 : 0; // 1 if instruction fetch translation, 0 if data translation
+		bool is_itlb = (iflag != 0);                                               // Boolean flag selecting ITLB vs DTLB statistics bucket
+		LampSideStats &stats_side = is_itlb ? lamp_system.stats[read_cpu].itlb : lamp_system.stats[read_cpu].dtlb; // Reference to ITLB or DTLB side stats
+
+		// Record start cycle of translation miss to measure load completion and instruction fetch latency
+		lamp_system.record_translation_miss_start(read_cpu, RQ.entry[index].instr_id, is_itlb, current_core_cycle[read_cpu]);
+
+		if (cache_type == IS_STLB) {
+			if (stlb_block_mode == STLB_BLOCK_ANALYSIS) {
+				uint64_t ignored_ppn;
+				PACKET entry = RQ.entry[index];
+				if (stlb_block_lookup(entry.address, (entry.full_addr ? entry.full_addr : entry.address), &ignored_ppn))
+					stlb_block_hits++;
+				else
+					stlb_block_misses++;
+			}
+			uint64_t pa = 0;
+			pair<int, int> answer;
+
+			int *free_indexes;
+			free_indexes = sorted_free_distances();
+
+			if (unsigned(RQ.entry[index].instruction) != 0) {
+				stlb_misses[1]++;                                                  // Increment I-STLB MISSES counter
+				iflag = 1;
+				decay_timer++;
+				decay_conf_timer++;
+			} else {
+				stlb_misses[0]++;                                                  // Increment D-STLB MISSES counter
+			}
+
+			int fctb_found_pos = -10;
+			if (iflag == 1) {
+				refresh_fctb(current_core_cycle[read_cpu]);
+				fctb_found_pos = search_fctb(RQ.entry[index].address);
+				answer = check_hit_stlb_pq(RQ.entry[index].address);
+			} else {
+				answer = make_pair(-1, -1);
+			}
+
+			VA_TO_PA_RESULT v2p = {};
+			if (answer.first == -1) {
+				if (iflag) {
+					if (fctb_found_pos == -10) {
+						v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
+						pa = v2p.pa;
+						RQ.entry[index].hit_where = v2p.hit_where;
+						RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
+						int victim_entry = fctb_replacement_policy();
+						fctb[victim_entry][0] = current_vpn;
+						fctb[victim_entry][1] = (RQ.entry[index].full_addr & 0x7000) / 4096;
+						fctb[victim_entry][2] = current_core_cycle[read_cpu];
+						fctb[victim_entry][3] = v2p.cstall;
+					} else {
+						pa = va_to_pa_prefetch(read_cpu, full_addr, RQ.entry[index].address);
+						if (pa == 0) {
+							v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
+							pa = v2p.pa;
+							RQ.entry[index].hit_where = v2p.hit_where;
+							RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
+						} else {
+							// Satisfied by FCTB prefetch without a page table walk
+							stats_side.triggers++;
+							stats_side.ptw_wins++;
+							stats_side.ptw_tlb_fills++;
+							stats_side.hist_ptw_translation_latency.record(0);
+							stats_side.load_translation_count++;
+							lamp_system.fill_leaf_cache(read_cpu, current_vpn, pa >> LOG2_PAGE_SIZE, RQ.entry[index].hit_where);
+						}
+					}
+				} else {
+					v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, full_addr, RQ.entry[index].address, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
+					pa = v2p.pa;
+					RQ.entry[index].hit_where = v2p.hit_where;
+					RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;
+				}
+				if (iflag == 1)
+					pf_misses_pq++;
+			} else {
+				if (PQ.entry[answer.first].free_bit == 1 && PQ.entry[answer.first].free_distance != 0) {
+					rfhits[1]++;
+					free_hits[PQ.entry[answer.first].free_distance + 6 + (PQ.entry[answer.first].free_distance < 0) * 1]++;
+				} else {
+					rfhits[0]++;
+				}
+
+				if (warmup_complete[cpu]) {
+					uint64_t num_cycles;
+
+					if (PQ.entry[answer.first].irip)
+						irip_hits++;
+					else
+						sdp_hits++;
+
+					if (answer.second == 0) {
+						num_cycles = current_core_cycle[read_cpu] - PQ.return_event_cycle(answer.first);
+						if (num_cycles < PQ.entry[answer.first].stall_cycles) {
+							add_stall_prefetch(PQ.entry[answer.first].stall_cycles - num_cycles, read_cpu);
+						}
+					}
+				}
+
+				if (answer.second == 0) {
+					pa = PQ.entry[answer.first].data;
+					if (PQ.entry[answer.first].lad == 1)
+						hit_prefetches_lad++;
+					PQ.remove_queue_prefetch(&PQ.entry[answer.first], answer.first);
+				}
+
+				pf_hits_pq++;
+
+				// Record STLB PQ hit in LampSideStats
+				stats_side.triggers++;
+				stats_side.ptw_wins++;
+				stats_side.ptw_tlb_fills++;
+				stats_side.hist_ptw_translation_latency.record(0);
+				stats_side.load_translation_count++;
+				lamp_system.fill_leaf_cache(read_cpu, current_vpn, pa >> LOG2_PAGE_SIZE, RQ.entry[index].hit_where);
+			}
+
+			vpn_history.insert(current_vpn);
+			RQ.entry[index].data = pa >> LOG2_PAGE_SIZE;
+			RQ.entry[index].event_cycle = current_core_cycle[read_cpu];
+			return_data(&RQ.entry[index]);
+
+			if (iflag == 1) {
+				free_indexes = sorted_free_distances();
+				stlb_prefetcher_operate(RQ.entry[index].address, RQ.entry[index].ip, 0, RQ.entry[index].type, answer.first, warmup_complete[cpu], free_indexes, RQ.entry[index].instr_id, iflag);
+				stlb_prefetcher_cache_fill(RQ.entry[index].address, 0, 0, 0, 0);
+			}
+		} else {
+			// STLB OFF (B0 / L0): ITLB or DTLB miss directly invokes va_to_pa (which runs PTW or LAMP+PTW)
+			VA_TO_PA_RESULT v2p = va_to_pa(read_cpu, RQ.entry[index].instr_id, full_addr, current_vpn, RQ.entry[index].ip, RQ.entry[index].type, iflag, 0);
+			uint64_t pa = v2p.pa;                                                  // Translated 64-bit physical address
+			RQ.entry[index].hit_where = v2p.hit_where;                             // Record cache level that served leaf PTE
+			RQ.entry[index].is_non_compulsory = v2p.is_non_compulsory;             // Record non-compulsory status
+
+			RQ.entry[index].data = pa >> LOG2_PAGE_SIZE;
+			RQ.entry[index].event_cycle = current_core_cycle[read_cpu];
+			return_data(&RQ.entry[index]);
+		}
 	}

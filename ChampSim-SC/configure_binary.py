@@ -36,6 +36,8 @@ LEGACY_OPTIONS = {
     "--traffic_only_packets": "simulator.traffic_only_packets",
     "--ptw_traffic_packets": "simulator.traffic_only_packets",
     "--stlb_oracle": "simulator.stlb_oracle",
+    "--lamp": "simulator.lamp",
+    "--stlb": "simulator.stlb",
     "--ptw_start_level": "simulator.ptw_start_level",
     "--flush_on_end": "simulator.flush_on_end",
     "--asap": "simulator.asap", "-asap": "simulator.asap",
@@ -325,6 +327,7 @@ def configure(c: configparser.ConfigParser, config_path: Path) -> list[str]:
         "LLIMIT": "lookahead_limit", "CNF_BITS": "confidence_bits",
         "RP_SUC_MP": "successor_replacement_policy", "FLUSH_ON_END": "flush_on_end",
         "TRAFFIC_ONLY_PACKETS": "traffic_only_packets", "STLB_ORACLE": "stlb_oracle",
+        "DEFAULT_LAMP": "lamp", "DEFAULT_STLB": "stlb",
     }
     for macro, key in cache_macros.items():
         replace_define("inc/cache.h", macro, get("simulator", key))

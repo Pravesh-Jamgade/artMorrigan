@@ -4,6 +4,7 @@
 #include "ooo_cpu.h"
 #include "uncore.h"
 #include "config_params.h"
+#include "lamp.h"
 #include <fstream>
 
 uint8_t warmup_complete[NUM_CPUS], 
@@ -208,6 +209,7 @@ void write_csv_stats()
 			pte_valid_labels.push_back(to_string(valid));
 		write_csv_vector(csv, prefix + "L2C_translation_valid_entries_on_eviction", pte_valid_labels,
 			ooo_cpu[cpu].L2C.translation_valid_entries_on_eviction);
+		write_csv_scalar(csv, prefix + "L2C_valid_count_zero_events", ooo_cpu[cpu].L2C.valid_count_zero_events);
 
 		csv << "L2C_VALID_FOOTPRINT_MATRIX," << cpu << "\nvalid,fp0,fp1,fp2,fp3,fp4,fp5,fp6,fp7,fp8\n";
 		for (uint32_t v = 0; v <= 8; ++v) {
@@ -242,6 +244,7 @@ void write_csv_stats()
 		pte_valid_labels.push_back(to_string(valid));
 	write_csv_vector(csv, "LLC_translation_valid_entries_on_eviction", pte_valid_labels,
 		uncore.LLC.translation_valid_entries_on_eviction);
+	write_csv_scalar(csv, "LLC_valid_count_zero_events", uncore.LLC.valid_count_zero_events);
 
 	csv << "LLC_VALID_FOOTPRINT_MATRIX\nvalid,fp0,fp1,fp2,fp3,fp4,fp5,fp6,fp7,fp8\n";
 	for (uint32_t v = 0; v <= 8; ++v) {
@@ -328,6 +331,11 @@ void write_csv_stats()
 
 	print_offset_hist(uncore.LLC.collect_stats, "LLC");
 	print_offset_hist(uncore.DRAM.collect_stats, "DRAM");
+
+	// LAMP: Emit structured LAMP CSV rows (LAMP,<cpu>,...) for every simulated core
+	for (uint32_t i = 0; i < NUM_CPUS; i++) {
+		lamp_system.print_csv_stats(csv, i);
+	}
 
 	csv << "CSV_STATS_END\n";
 }
@@ -529,6 +537,7 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 				cout << ' ' << cache->translation_valid_footprint_matrix[valid][fp];
 			cout << endl;
 		}
+		cout << cache->NAME << " PT PTE BLOCK VALID COUNT 0 EVENTS: " << cache->valid_count_zero_events << endl;
 	}
 	//cout << " AVERAGE MISS LATENCY: " << (cache->total_miss_latency)/TOTAL_MISS << " cycles " << cache->total_miss_latency << "/" << TOTAL_MISS<< endl;
 }
@@ -635,6 +644,7 @@ void reset_cache_stats(uint32_t cpu, CACHE *cache)
 		cache->translation_valid_entries_on_eviction[i] = 0;
 		for (int j = 0; j < 9; ++j) cache->translation_valid_footprint_matrix[i][j] = 0;
 	}
+	cache->valid_count_zero_events = 0;
 	for (int bucket = 0; bucket < 6; ++bucket) {
 		cache->rrc[bucket] = 0;
 		cache->shadow_stlb_rrc[bucket] = 0;
@@ -793,6 +803,8 @@ void finish_warmup()
 		reset_cache_stats(i, &ooo_cpu[i].ITLB);
 		reset_cache_stats(i, &uncore.LLC);
 	}
+	// LAMP: Reset all LAMP and baseline core translation statistics at the end of warmup
+	lamp_system.reset_stats();
 	cout << endl;
 
 	// reset DRAM stats
@@ -1125,6 +1137,9 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 				uncore.LLC.invalidate_entry(cl_addr, cl_addr);
 			}
 
+			// LAMP: Invalidate the swapped-out virtual page's leaf-PTE slot in L2C and LLC
+			lamp_system.invalidate_leaf_cache(cpu, NRU_vpage & ~high_bit_mask);
+
 			swap = 1;
 		} else {
 			uint8_t fragmented = 0;
@@ -1230,9 +1245,23 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 	if (walk_depth >= 4)
 		ooo_cpu[cpu].STLB.lru_pd(ooo_cpu[cpu].STLB.mmu_timer, compare_pd);
 
+	bool is_itlb = (iflag != 0);
+	LampSideStats &stats_side = is_itlb ? lamp_system.stats[cpu].itlb : lamp_system.stats[cpu].dtlb;
+	if (!magic) {
+		// Count every demand translation walk triggered on ITLB or DTLB
+		stats_side.triggers++;
+	}
+
 	if (swap){
 		if(magic != 2)
 			stall_cycle[cpu] = current_core_cycle[cpu] + SWAP_LATENCY;
+		if (!magic) {
+			stats_side.ptw_wins++;
+			stats_side.ptw_tlb_fills++;
+			stats_side.hist_ptw_translation_latency.record(SWAP_LATENCY);
+			stats_side.load_translation_latency_sum += SWAP_LATENCY;
+			stats_side.load_translation_count++;
+		}
 	}
 	else{
 		for (uint32_t level = 0; level < 3; ++level)
@@ -1261,6 +1290,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 		}
 
 		cstall = 2;
+		uint64_t arch_ptw_cstall = 2;                                              // Un-canceled architectural PTW latency (starts at 2 cycles for PWC lookup)
 		uint32_t set, way_fill;
 		int way_read;
 		int debug = 0;
@@ -1268,6 +1298,49 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 
 		int asap = ASAP;
 		int ideal = iflag * IDEAL;
+
+		// =====================================================================
+		// LAMP Parallel Direct Leaf-PTE Lookup (Launched at cycle 0 when knob_lamp == 1)
+		// =====================================================================
+		TranslationTransaction *tx = nullptr;
+		bool lamp_found = false;
+		uint64_t lamp_ppn = 0;
+		uint8_t lamp_hit_where = 0;
+		uint64_t lamp_arch_lat = UINT64_MAX;
+		uint64_t l1_probe_lat = (PTW_START_LEVEL == 1) ? L1D_LATENCY : 0;          // L1D probe latency paid when PTW starts from L1
+		bool ptw_canceled_early = false;                                           // True if LAMP completes and cancels an upper PTW level (lvl >= 1)
+		int ptw_cancel_lvl = -1;                                                   // Upper PTW level (3=PML4, 2=PDP, 1=PD) where PTW was canceled
+
+		if (knob_lamp && !magic && !asap && ideal != 1) {
+			// Instantiate shared transaction linking LAMP_PATH and PTW_PATH
+			tx = lamp_system.start_transaction(cpu, instr_id, va, unique_vpage, ip, type, is_itlb,
+				knob_stlb ? IS_STLB : (is_itlb ? IS_ITLB : IS_DTLB));
+			// Probe leaf PTE (lvl == 0) in L1D (if PTW_START_LEVEL == 1), L2C, and LLC (never DRAM)
+			lamp_found = lamp_system.lookup_leaf_cache(cpu, unique_vpage, lamp_ppn, lamp_hit_where);
+			if (lamp_found) {
+				if (lamp_hit_where == 1) {
+					stats_side.lamp_l1_hit++;                                      // Direct leaf-PTE hit in L1D
+					lamp_arch_lat = L1D_LATENCY;                                   // Architectural latency of L1D leaf-PTE lookup
+				} else if (lamp_hit_where == 2) {
+					stats_side.lamp_l2_hit++;                                      // Direct leaf-PTE hit in L2C
+					lamp_arch_lat = l1_probe_lat + L2C_LATENCY;                    // Architectural latency of L2C leaf-PTE lookup
+				} else if (lamp_hit_where == 3) {
+					stats_side.lamp_llc_hit++;                                     // Direct leaf-PTE hit in LLC
+					lamp_arch_lat = l1_probe_lat + L2C_LATENCY + LLC_LATENCY;      // Architectural latency of LLC leaf-PTE lookup
+				}
+				tx->lamp_usable = true;                                            // Mark LAMP lookup result usable
+				tx->translated_ppn = (lamp_ppn != 0) ? lamp_ppn : (pa >> LOG2_PAGE_SIZE);
+				tx->lamp_hit_where = lamp_hit_where;                               // Record cache level that served the leaf PTE
+				tx->lamp_ready_cycle = tx->trigger_cycle + lamp_arch_lat;          // Absolute cycle when LAMP finishes
+			} else {
+				if (lamp_hit_where == 0xFF)
+					stats_side.lamp_hit_unusable++;                                // Leaf-PTE block present, but target PTE offset invalidated
+				else
+					stats_side.lamp_miss++;                                        // Leaf-PTE block absent from L1D/L2C/LLC (stops at LLC, never DRAM)
+				tx->lamp_usable = false;
+				tx->lamp_ready_cycle = UINT64_MAX;
+			}
+		}
 
 		if (!asap && ideal != 1) {
 			int level_target_fill[10] = {0};
@@ -1290,6 +1363,33 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 					search_packet.full_addr = addr;
 					search_packet.cpu = cpu;
 
+					// ---------------------------------------------------------
+					// LAMP Upper-Level PTW Cancellation Check (for lvl > 0)
+					// ---------------------------------------------------------
+					// If LAMP's direct leaf-PTE lookup has already completed before
+					// this upper PTW level (PML4, PDP, or PD) starts or while an
+					// earlier upper level was stalled, cancel this upper PTW level so
+					// it does not issue cache fills, evictions, or DRAM requests.
+					if (lvl > 0 && knob_lamp && !magic && lamp_found && arch_ptw_cstall >= lamp_arch_lat) {
+						if (!ptw_canceled_early) {
+							ptw_canceled_early = true;
+							ptw_cancel_lvl = lvl;
+						}
+						// Compute what this upper level's latency would have been (read-only) for PTW latency histograms
+						int ro_l1 = (PTW_START_LEVEL == 1) ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
+						if (ro_l1 >= 0) {
+							arch_ptw_cstall += l1_probe_lat;
+						} else {
+							arch_ptw_cstall += l1_probe_lat + L2C_LATENCY;
+							if (ooo_cpu[cpu].L2C.check_hit(&search_packet) < 0) {
+								arch_ptw_cstall += LLC_LATENCY;
+								if (uncore.LLC.check_hit(&search_packet) < 0)
+									arch_ptw_cstall += 200;
+							}
+						}
+						continue;
+					}
+
 					set = ooo_cpu[cpu].L1D.get_set(addr >> LOG2_BLOCK_SIZE);
 					way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
@@ -1302,25 +1402,51 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 							ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_read, ooo_cpu[cpu].L1D.block[set][way_read].full_addr, ip, (lvl==0)?type:0, type, 1);
 							ooo_cpu[cpu].L1D.block[set][way_read].used = 1;
 						}
-						cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
+						cstall += l1_probe_lat;
+						arch_ptw_cstall += l1_probe_lat;
 					} else {
-						cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
+						cstall += l1_probe_lat;
+						arch_ptw_cstall += l1_probe_lat;
+
+						// If an upper PTW level (lvl > 0) missed in L1D and LAMP already completed during the L1D probe, cancel before L2C
+						if (lvl > 0 && knob_lamp && !magic && lamp_found && arch_ptw_cstall >= lamp_arch_lat) {
+							if (!ptw_canceled_early) {
+								ptw_canceled_early = true;
+								ptw_cancel_lvl = lvl;
+							}
+							arch_ptw_cstall += L2C_LATENCY;
+							if (ooo_cpu[cpu].L2C.check_hit(&search_packet) < 0) {
+								arch_ptw_cstall += LLC_LATENCY;
+								if (uncore.LLC.check_hit(&search_packet) < 0)
+									arch_ptw_cstall += 200;
+							}
+							continue;
+						}
 
 						if (!magic && PTW_START_LEVEL == 1) {
-							way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L1D.block[set], ip, addr, type);
-							ooo_cpu[cpu].L1D.record_footprint_on_eviction(set, way_fill);
-							ooo_cpu[cpu].L1D.update_replacement_state(cpu, set, way_fill, addr, ip, (lvl==0)?ooo_cpu[cpu].L1D.block[set][way_fill].full_addr:0, type, 0);
+							uint32_t l1_set = set;
+							way_fill = ooo_cpu[cpu].L1D.find_victim(cpu, instr_id, l1_set, ooo_cpu[cpu].L1D.block[l1_set], ip, addr, type);
+							// LAMP: If a leaf-PTE cache line fill (lvl == 0) in L1D (when PTW_START_LEVEL == 1) displaces a valid non-PTE data block,
+							// increment the core's data-line displacement counter (lamp_data_evictions) and record the displaced data tag
+							if (lvl == 0 && ooo_cpu[cpu].L1D.block[l1_set][way_fill].valid && !ooo_cpu[cpu].L1D.block[l1_set][way_fill].is_leaf_pte && ooo_cpu[cpu].L1D.block[l1_set][way_fill].ptw_level == UINT8_MAX) {
+								if (cpu < lamp_system.stats.size()) {
+									lamp_system.stats[cpu].lamp_data_evictions++;
+									lamp_system.stats[cpu].displaced_data_l1d.insert(ooo_cpu[cpu].L1D.block[l1_set][way_fill].address);
+								}
+							}
+							ooo_cpu[cpu].L1D.record_footprint_on_eviction(l1_set, way_fill);
+							ooo_cpu[cpu].L1D.update_replacement_state(cpu, l1_set, way_fill, addr, ip, (lvl==0)?ooo_cpu[cpu].L1D.block[l1_set][way_fill].full_addr:0, type, 0);
 
-							if (ooo_cpu[cpu].L1D.block[set][way_fill].valid == 0) ooo_cpu[cpu].L1D.block[set][way_fill].valid = 1;
-							ooo_cpu[cpu].L1D.block[set][way_fill].dirty = 0;
-							ooo_cpu[cpu].L1D.block[set][way_fill].prefetch = 0;
-							ooo_cpu[cpu].L1D.block[set][way_fill].used = 0;
-							ooo_cpu[cpu].L1D.block[set][way_fill].tag = addr >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L1D.block[set][way_fill].address = addr >> LOG2_BLOCK_SIZE;
-							ooo_cpu[cpu].L1D.block[set][way_fill].full_addr = addr;
-							ooo_cpu[cpu].L1D.mark_translation_access(set, way_fill, addr, stat_idx, false);
-							ooo_cpu[cpu].L1D.block[set][way_fill].data = 55;
-							ooo_cpu[cpu].L1D.block[set][way_fill].cpu = cpu;
+							if (ooo_cpu[cpu].L1D.block[l1_set][way_fill].valid == 0) ooo_cpu[cpu].L1D.block[l1_set][way_fill].valid = 1;
+							ooo_cpu[cpu].L1D.block[l1_set][way_fill].dirty = 0;
+							ooo_cpu[cpu].L1D.block[l1_set][way_fill].prefetch = 0;
+							ooo_cpu[cpu].L1D.block[l1_set][way_fill].used = 0;
+							ooo_cpu[cpu].L1D.block[l1_set][way_fill].tag = addr >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L1D.block[l1_set][way_fill].address = addr >> LOG2_BLOCK_SIZE;
+							ooo_cpu[cpu].L1D.block[l1_set][way_fill].full_addr = addr;
+							ooo_cpu[cpu].L1D.mark_translation_access(l1_set, way_fill, addr, stat_idx, false);
+							ooo_cpu[cpu].L1D.block[l1_set][way_fill].data = 55;
+							ooo_cpu[cpu].L1D.block[l1_set][way_fill].cpu = cpu;
 						}
 
 						set = ooo_cpu[cpu].L2C.get_set(addr >> LOG2_BLOCK_SIZE);
@@ -1340,11 +1466,34 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 								ooo_cpu[cpu].L2C.block[set][way_read].used = 1;
 							}
 							cstall += L2C_LATENCY;
+							arch_ptw_cstall += L2C_LATENCY;
 						} else {
 							cstall += L2C_LATENCY;
+							arch_ptw_cstall += L2C_LATENCY;
+
+							// If an upper PTW level (lvl > 0) missed in L2C and LAMP already completed during the L2C probe,
+							// cancel before allocating an L2C victim or probing LLC/DRAM
+							if (lvl > 0 && knob_lamp && !magic && lamp_found && arch_ptw_cstall >= lamp_arch_lat) {
+								if (!ptw_canceled_early) {
+									ptw_canceled_early = true;
+									ptw_cancel_lvl = lvl;
+								}
+								arch_ptw_cstall += LLC_LATENCY;
+								if (uncore.LLC.check_hit(&search_packet) < 0)
+									arch_ptw_cstall += 200;
+								continue;
+							}
 
 							if (!magic) {
 								way_fill = ooo_cpu[cpu].L2C.find_victim(cpu, instr_id, set, ooo_cpu[cpu].L2C.block[set], ip, addr, type);
+								// LAMP: If a leaf-PTE cache line fill (lvl == 0) in L2C displaces a valid non-PTE data block,
+								// increment the core's data-line displacement counter (lamp_data_evictions) and record the displaced data tag
+								if (lvl == 0 && ooo_cpu[cpu].L2C.block[set][way_fill].valid && !ooo_cpu[cpu].L2C.block[set][way_fill].is_leaf_pte && ooo_cpu[cpu].L2C.block[set][way_fill].ptw_level == UINT8_MAX) {
+									if (cpu < lamp_system.stats.size()) {
+										lamp_system.stats[cpu].lamp_data_evictions++;
+										lamp_system.stats[cpu].displaced_data_l2c.insert(ooo_cpu[cpu].L2C.block[set][way_fill].address);
+									}
+								}
 								ooo_cpu[cpu].L2C.record_footprint_on_eviction(set, way_fill);
 								ooo_cpu[cpu].L2C.update_replacement_state(cpu, set, way_fill, addr, ip, (lvl==0)?ooo_cpu[cpu].L2C.block[set][way_fill].full_addr:0, type, 0);
 
@@ -1378,22 +1527,20 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 									uncore.LLC.llc_update_replacement_state(cpu, set, way_read, uncore.LLC.block[set][way_read].full_addr, ip, 0, type, 1);
 									uncore.LLC.block[set][way_read].used = 1;
 								}
-								if (lvl == 0 && is_non_compulsory && (ptw_bound_mode & PTW_BOUND_LLC)) {
-									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked++;
-									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_llc_bound++;
-									if (ptw_latency_mode == PTW_LATENCY_STLB) {
-										cstall = 0; // Only STLB_LATENCY (already paid in STLB RQ)
-										level_target_fill[lvl] = 0;
-									} else if (ptw_latency_mode == PTW_LATENCY_L2) {
-										// Only L2C_LATENCY (already added on L2C miss)
-										level_target_fill[lvl] = FILL_L2;
-									} else {
-										cstall += LLC_LATENCY;
-									}
-								} else {
-									cstall += LLC_LATENCY;
-								}
+								cstall += LLC_LATENCY;
+								arch_ptw_cstall += LLC_LATENCY;
 							} else {
+								// If an upper PTW level (lvl > 0) missed in LLC and LAMP already completed during the LLC probe,
+								// cancel before allocating an LLC victim or issuing a 200-cycle DRAM read
+								if (lvl > 0 && knob_lamp && !magic && lamp_found && (arch_ptw_cstall + LLC_LATENCY) >= lamp_arch_lat) {
+									if (!ptw_canceled_early) {
+										ptw_canceled_early = true;
+										ptw_cancel_lvl = lvl;
+									}
+									arch_ptw_cstall += LLC_LATENCY + 200;
+									continue;
+								}
+
 								if (lvl == 0) 
 								{
 									search_packet.hit_where = 4;
@@ -1405,6 +1552,14 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 
 								if (!magic) {
 									way_fill = uncore.LLC.llc_find_victim(cpu, instr_id, set, uncore.LLC.block[set], ip, addr, type);
+									// LAMP: If a leaf-PTE cache line fill (lvl == 0) in LLC displaces a valid non-PTE data block,
+									// increment the core's data-line displacement counter (lamp_data_evictions) and record the displaced data tag
+									if (lvl == 0 && uncore.LLC.block[set][way_fill].valid && !uncore.LLC.block[set][way_fill].is_leaf_pte && uncore.LLC.block[set][way_fill].ptw_level == UINT8_MAX) {
+										if (cpu < lamp_system.stats.size()) {
+											lamp_system.stats[cpu].lamp_data_evictions++;
+											lamp_system.stats[cpu].displaced_data_llc.insert(uncore.LLC.block[set][way_fill].address);
+										}
+									}
 									uncore.LLC.record_footprint_on_eviction(set, way_fill);
 									uncore.LLC.llc_update_replacement_state(cpu, set, way_fill, addr, ip, (lvl==0)?uncore.LLC.block[set][way_fill].full_addr:0, type, 0);
 
@@ -1423,27 +1578,129 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 								ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][3]++;
 								if (!knob_traffic_only_packets)
 									issue_ptw_dram_read(cpu, addr, instr_id, ip, type, stat_idx);
-								if (lvl == 0 && is_non_compulsory && (ptw_bound_mode & PTW_BOUND_DRAM)) {
-									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked++;
-									ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_dram_bound++;
-									if (ptw_latency_mode == PTW_LATENCY_STLB) {
-										cstall = 0; // Only STLB_LATENCY (already paid in STLB RQ)
-										level_target_fill[lvl] = 0;
-									} else if (ptw_latency_mode == PTW_LATENCY_L2) {
-										// Only L2C_LATENCY (already added on L2C miss)
-										level_target_fill[lvl] = FILL_L2;
-									} else if (ptw_latency_mode == PTW_LATENCY_L2_LLC) {
-										cstall += LLC_LATENCY;
-										level_target_fill[lvl] = FILL_LLC;
-									} else {
-										cstall += LLC_LATENCY + 200;
-									}
-								} else {
-									cstall += LLC_LATENCY + 200;
-								}
+								cstall += LLC_LATENCY + 200;
+								arch_ptw_cstall += LLC_LATENCY + 200;
 							}
 						}
 					}
+				}
+			}
+
+			// =================================================================
+			// LAMP vs PTW Winner Arbitration & Cancellation Accounting
+			// =================================================================
+			if (knob_lamp && !magic && tx != nullptr) {
+				tx->ptw_ready_cycle = tx->trigger_cycle + arch_ptw_cstall;
+				tx->ptw_leaf_ready_cycle = tx->ptw_ready_cycle;
+
+				if (tx->lamp_usable && (lamp_arch_lat < arch_ptw_cstall)) {
+					// LAMP WINS: Direct leaf-PTE lookup completed ahead of the multi-level PTW walk
+					tx->winner = WINNER_LAMP;
+					tx->state = STATE_COMPLETED_BY_LAMP;
+					stats_side.lamp_wins++;
+					stats_side.lamp_tlb_fills++;
+
+					// Set architectural translation latency to LAMP's leaf-PTE lookup latency
+					cstall = lamp_arch_lat;
+
+					// Attribute PTW cancellation stage and avoided downstream PTW requests
+					stats_side.ptw_cancel_count++;
+					if (ptw_canceled_early) {
+						if (ptw_cancel_lvl == 3) {
+							stats_side.ptw_cancel_pml4++;
+							stats_side.ptw_requests_avoided += 3;
+							tx->ptw_cancel_stage = PTW_STAGE_PML4;
+						} else if (ptw_cancel_lvl == 2) {
+							stats_side.ptw_cancel_pdp++;
+							stats_side.ptw_requests_avoided += 2;
+							tx->ptw_cancel_stage = PTW_STAGE_PDP;
+						} else {
+							stats_side.ptw_cancel_pd++;
+							stats_side.ptw_requests_avoided += 1;
+							tx->ptw_cancel_stage = PTW_STAGE_PD;
+						}
+					} else if (lamp_arch_lat <= l1_probe_lat + L2C_LATENCY) {
+						stats_side.ptw_cancel_pml4++;
+						stats_side.ptw_requests_avoided += 3;
+						tx->ptw_cancel_stage = PTW_STAGE_PML4;
+					} else {
+						stats_side.ptw_cancel_leaf++;
+						stats_side.ptw_requests_avoided += 1;
+						tx->ptw_cancel_stage = PTW_STAGE_LEAF;
+					}
+					stats_side.ptw_inflight_wasted++;
+					stats_side.outstanding_uncancelable++;
+
+					// Record architectural timing distributions: LAMP lookup latency, PTW latency, lead time, and advancement
+					stats_side.hist_lamp_lookup_latency.record(lamp_arch_lat);
+					stats_side.hist_ptw_translation_latency.record(arch_ptw_cstall);
+					int64_t lead = (int64_t)arch_ptw_cstall - (int64_t)lamp_arch_lat;
+					stats_side.hist_lamp_lead_over_ptw.record(lead);
+					stats_side.hist_physical_access_advancement.record(lead);
+					stats_side.load_translation_latency_sum += lamp_arch_lat;
+					stats_side.load_translation_count++;
+
+					// Early physical data access tracking
+					stats_side.early_data_requests++;
+					if (tx->lamp_hit_where == 1) stats_side.early_data_l1_hit++;
+					else if (tx->lamp_hit_where == 2) stats_side.early_data_l2_hit++;
+					else if (tx->lamp_hit_where == 3) stats_side.early_data_llc_hit++;
+					stats_side.early_data_useful++;
+				} else {
+					// PTW WINS: LAMP missed in L1D/L2C/LLC (leaf PTE was in DRAM)
+					tx->winner = WINNER_PTW;
+					tx->state = STATE_COMPLETED_BY_PTW;
+					stats_side.ptw_wins++;
+					stats_side.ptw_tlb_fills++;
+
+					if (tx->lamp_usable && lamp_arch_lat >= arch_ptw_cstall) {
+						stats_side.lamp_cancel_count++;
+						stats_side.lamp_late_hit++;
+						int64_t lead = (int64_t)arch_ptw_cstall - (int64_t)lamp_arch_lat;
+						stats_side.hist_lamp_lead_over_ptw.record(lead);
+					}
+					stats_side.hist_ptw_translation_latency.record(arch_ptw_cstall);
+					stats_side.load_translation_latency_sum += arch_ptw_cstall;
+					stats_side.load_translation_count++;
+				}
+
+				lamp_system.completed_trans_history[tx->trans_id] = current_core_cycle[cpu];
+				tx->tlb_filled = true;
+				tx->mshr_released = true;
+			} else if (!knob_lamp && !magic) {
+				// Baseline PTW accounting (when knob_lamp == 0)
+				stats_side.ptw_wins++;
+				stats_side.ptw_tlb_fills++;
+				stats_side.hist_ptw_translation_latency.record(arch_ptw_cstall);
+				stats_side.load_translation_latency_sum += arch_ptw_cstall;
+				stats_side.load_translation_count++;
+			}
+
+			// =================================================================
+			// Apply Non-Compulsory Leaf PTE Bound & Latency Mode (bound / latency knobs)
+			// =================================================================
+			if (search_packet.hit_where == 3 && is_non_compulsory && (ptw_bound_mode & PTW_BOUND_LLC)) {
+				ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked++;
+				ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_llc_bound++;
+				if (ptw_latency_mode == PTW_LATENCY_STLB) {
+					cstall = 0; // Only STLB_LATENCY (already paid in STLB RQ)
+					level_target_fill[0] = 0;
+				} else if (ptw_latency_mode == PTW_LATENCY_L2) {
+					cstall = (cstall > LLC_LATENCY) ? (cstall - LLC_LATENCY) : 0;
+					level_target_fill[0] = FILL_L2;
+				}
+			} else if (search_packet.hit_where == 4 && is_non_compulsory && (ptw_bound_mode & PTW_BOUND_DRAM)) {
+				ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked++;
+				ooo_cpu[cpu].STLB.stlb_non_compulsory_tracked_dram_bound++;
+				if (ptw_latency_mode == PTW_LATENCY_STLB) {
+					cstall = 0; // Only STLB_LATENCY (already paid in STLB RQ)
+					level_target_fill[0] = 0;
+				} else if (ptw_latency_mode == PTW_LATENCY_L2) {
+					cstall = (cstall > (LLC_LATENCY + 200)) ? (cstall - (LLC_LATENCY + 200)) : 0;
+					level_target_fill[0] = FILL_L2;
+				} else if (ptw_latency_mode == PTW_LATENCY_L2_LLC) {
+					cstall = (cstall > 200) ? (cstall - 200) : 0;
+					level_target_fill[0] = FILL_LLC;
 				}
 			}
 
@@ -1467,6 +1724,8 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 				ooo_cpu[cpu].STLB.sector_tracker.record_fill_source(unique_vpage, search_packet.hit_where);
 			}
 		}
+		// LAMP: Always tag the leaf-PTE cache line installed in L1D (when PTW_START_LEVEL == 1), L2C, and LLC with VA-group metadata
+		lamp_system.fill_leaf_cache(cpu, unique_vpage, pa >> LOG2_PAGE_SIZE, search_packet.hit_where);
 	}
 	VA_TO_PA_RESULT res;
 	res.pa = pa;
@@ -1696,6 +1955,13 @@ int main(int argc, char** argv)
 			{"stlb_oracle", required_argument, 0, 'O'},
 			{"flush_on_end", required_argument, 0, 'F'},
 			{"page_size", required_argument, 0, 'p'},
+			// LAMP & STLB CLI configuration options:
+			{"lamp", optional_argument, 0, 'M'},        // -lamp or --lamp[=0|1]: enable/disable LAMP parallel leaf-PTE lookup
+			{"enable_lamp", no_argument, 0, 'M'},       // --enable_lamp: explicitly enable LAMP
+			{"disable_lamp", no_argument, 0, 'm'},      // --disable_lamp: explicitly disable LAMP
+			{"stlb", optional_argument, 0, 'Z'},        // -stlb or --stlb[=0|1]: enable/disable Second-Level TLB (STLB)
+			{"enable_stlb", no_argument, 0, 'Z'},       // --enable_stlb: explicitly enable STLB
+			{"disable_stlb", no_argument, 0, 'z'},      // --disable_stlb: explicitly disable STLB
 			{0, 0, 0, 0}      
 		};
 
@@ -1790,6 +2056,24 @@ int main(int argc, char** argv)
 			case 'F':
 				knob_flush_on_end = atoi(optarg);
 				break;
+			case 'M': // LAMP enable/value flag (-lamp, --lamp, --enable_lamp)
+				if (optarg) knob_lamp = (atoi(optarg) != 0);
+				else if (optind < argc && (strcmp(argv[optind], "0") == 0 || strcmp(argv[optind], "1") == 0))
+					knob_lamp = (atoi(argv[optind++]) != 0);
+				else knob_lamp = 1;
+				break;
+			case 'm': // LAMP disable flag (--disable_lamp)
+				knob_lamp = 0;
+				break;
+			case 'Z': // STLB enable/value flag (-stlb, --stlb, --enable_stlb)
+				if (optarg) knob_stlb = (atoi(optarg) != 0);
+				else if (optind < argc && (strcmp(argv[optind], "0") == 0 || strcmp(argv[optind], "1") == 0))
+					knob_stlb = (atoi(argv[optind++]) != 0);
+				else knob_stlb = 1;
+				break;
+			case 'z': // STLB disable flag (--disable_stlb)
+				knob_stlb = 0;
+				break;
 
 			default:
 				abort();
@@ -1864,7 +2148,17 @@ int main(int argc, char** argv)
 	cout << "cloudsuite: " << (uint32_t)knob_cloudsuite << endl;
 	cout << "low_bandwidth: " << (uint32_t)knob_low_bandwidth << endl;
 	cout << "flush_on_end: " << (uint32_t)knob_flush_on_end << endl;
+	// LAMP: Print active lamp and stlb knob values and the resulting B0/B1/L0/L1 configuration
+	cout << "lamp: " << (uint32_t)knob_lamp << endl;
+	cout << "stlb: " << (uint32_t)knob_stlb << " (Configuration: "
+	     << (!knob_stlb && !knob_lamp ? "B0 [STLB OFF, LAMP OFF]" :
+	        (knob_stlb && !knob_lamp ? "B1 [STLB ON, LAMP OFF]" :
+	        (!knob_stlb && knob_lamp ? "L0 [STLB OFF, LAMP ON]" :
+	                                   "L1 [STLB ON, LAMP ON]")))
+	     << ")" << endl;
 	cout << "================================" << endl;
+	// LAMP: Print detailed LAMP & translation configuration block to terminal output
+	lamp_system.print_config(cout);
 
 	if (knob_low_bandwidth)
 		DRAM_MTPS = DRAM_IO_FREQ/4;
@@ -1982,6 +2276,8 @@ int main(int argc, char** argv)
 	// TODO: can we initialize these variables from the class constructor?
 	srand(seed_number);
 	champsim_seed = seed_number;
+	// LAMP: Initialize per-core LAMP transaction tables and statistics before simulation starts
+	lamp_system.init(NUM_CPUS);
 	for (int i=0; i<NUM_CPUS; i++) {
 
 		ooo_cpu[i].cpu = i; 
@@ -2002,7 +2298,6 @@ int main(int argc, char** argv)
 		ooo_cpu[i].ITLB.MAX_READ = 1;
 		ooo_cpu[i].ITLB.fill_level = FILL_L1;
 		ooo_cpu[i].ITLB.extra_interface = &ooo_cpu[i].L1I;
-		ooo_cpu[i].ITLB.lower_level = &ooo_cpu[i].STLB; 
 
 		ooo_cpu[i].DTLB.cpu = i;
 		ooo_cpu[i].DTLB.cache_type = IS_DTLB;
@@ -2010,14 +2305,26 @@ int main(int argc, char** argv)
 		//ooo_cpu[i].DTLB.MAX_READ = 2;
 		ooo_cpu[i].DTLB.fill_level = FILL_L1;
 		ooo_cpu[i].DTLB.extra_interface = &ooo_cpu[i].L1D;
-		ooo_cpu[i].DTLB.lower_level = &ooo_cpu[i].STLB;
+
+		// LAMP: Connect or bypass the Second-Level TLB (STLB) based on knob_stlb:
+		// - knob_stlb == 1 (B1 / L1): L1 ITLB and DTLB miss into STLB; STLB misses trigger PTW/LAMP
+		// - knob_stlb == 0 (B0 / L0): L1 ITLB and DTLB bypass STLB; L1 TLB misses directly trigger PTW/LAMP
+		if (knob_stlb) {
+			ooo_cpu[i].ITLB.lower_level = &ooo_cpu[i].STLB;
+			ooo_cpu[i].DTLB.lower_level = &ooo_cpu[i].STLB;
+			ooo_cpu[i].STLB.upper_level_icache[i] = &ooo_cpu[i].ITLB;
+			ooo_cpu[i].STLB.upper_level_dcache[i] = &ooo_cpu[i].DTLB;
+		} else {
+			ooo_cpu[i].ITLB.lower_level = NULL;
+			ooo_cpu[i].DTLB.lower_level = NULL;
+			ooo_cpu[i].STLB.upper_level_icache[i] = NULL;
+			ooo_cpu[i].STLB.upper_level_dcache[i] = NULL;
+		}
 
 		ooo_cpu[i].STLB.cpu = i;
 		ooo_cpu[i].STLB.cache_type = IS_STLB;
 		ooo_cpu[i].STLB.MAX_READ = 1;
 		ooo_cpu[i].STLB.fill_level = FILL_L2;
-		ooo_cpu[i].STLB.upper_level_icache[i] = &ooo_cpu[i].ITLB;
-		ooo_cpu[i].STLB.upper_level_dcache[i] = &ooo_cpu[i].DTLB;
 		ooo_cpu[i].STLB.stlb_prefetcher_initialize();
 
 		// PRIVATE CACHE
@@ -2095,6 +2402,75 @@ int main(int argc, char** argv)
 		for (int i=0; i<NUM_CPUS; i++) {
 			// proceed one cycle
 			current_core_cycle[i]++;
+
+			// -----------------------------------------------------------------
+			// ROB-Head Stall Attribution Sampling (Every Core Cycle)
+			// -----------------------------------------------------------------
+			// Analyzes the instruction at the head of the ROB. If uncompleted and
+			// waiting on memory, classifies whether it is waiting strictly for:
+			// 1. Translation only (waiting_trans && !waiting_data)
+			// 2. Demand data only (!waiting_trans && waiting_data)
+			// 3. Both translation and data (waiting_trans && waiting_data)
+			// Mutually exclusive accounting avoids overlapping double attribution.
+			if (ooo_cpu[i].ROB.occupancy > 0) {
+				uint32_t head = ooo_cpu[i].ROB.head;
+				if (ooo_cpu[i].ROB.entry[head].executed != COMPLETED) {
+					bool waiting_trans = false;
+					bool waiting_data = false;
+					if (ooo_cpu[i].ROB.entry[head].is_memory) {
+						// Check load queue dependencies
+						for (uint32_t s = 0; s < NUM_INSTR_SOURCES; s++) {
+							uint32_t lq_idx = ooo_cpu[i].ROB.entry[head].lq_index[s];
+							if (lq_idx < LQ_SIZE && ooo_cpu[i].LQ.entry[lq_idx].virtual_address != 0) {
+								if (ooo_cpu[i].LQ.entry[lq_idx].translated != COMPLETED) {
+									waiting_trans = true;
+								} else if (ooo_cpu[i].LQ.entry[lq_idx].fetched != COMPLETED) {
+									waiting_data = true;
+								}
+							}
+						}
+						// Check store queue dependencies
+						for (uint32_t d = 0; d < MAX_INSTR_DESTINATIONS; d++) {
+							uint32_t sq_idx = ooo_cpu[i].ROB.entry[head].sq_index[d];
+							if (sq_idx < SQ_SIZE && ooo_cpu[i].SQ.entry[sq_idx].virtual_address != 0) {
+								if (ooo_cpu[i].SQ.entry[sq_idx].translated != COMPLETED) {
+									waiting_trans = true;
+								} else if (ooo_cpu[i].SQ.entry[sq_idx].fetched != COMPLETED) {
+									waiting_data = true;
+								}
+							}
+						}
+					}
+					lamp_system.record_rob_head_stall(i, waiting_trans, waiting_data);
+				}
+			}
+
+			// -----------------------------------------------------------------
+			// Frontend Starvation & Fetch Stall Sampling
+			// -----------------------------------------------------------------
+			// Tracks cycles where:
+			// - IFETCH_BUFFER is empty (frontend starvation)
+			// - Oldest fetch entry is blocked on ITLB translation
+			// - Oldest fetch entry is blocked on L1-I cache fill
+			bool ifetch_empty = (ooo_cpu[i].IFETCH_BUFFER.occupancy == 0);
+			bool ifetch_itlb_wait = false;
+			bool ifetch_l1i_wait = false;
+			if (!ifetch_empty) {
+				uint32_t if_head = ooo_cpu[i].IFETCH_BUFFER.head;
+				if (ooo_cpu[i].IFETCH_BUFFER.entry[if_head].translated != COMPLETED)
+					ifetch_itlb_wait = true;
+				else if (ooo_cpu[i].IFETCH_BUFFER.entry[if_head].fetched != COMPLETED)
+					ifetch_l1i_wait = true;
+			}
+			lamp_system.record_frontend_starvation(i, ifetch_empty, ifetch_itlb_wait, ifetch_l1i_wait);
+
+			// -----------------------------------------------------------------
+			// Resource Occupancy Sampling
+			// -----------------------------------------------------------------
+			// Samples active PTW walker count (1 if core is stalled on walk, else 0),
+			// L2 MSHR occupancy, and LLC MSHR occupancy.
+			uint32_t ptw_occ = (stall_cycle[i] > current_core_cycle[i]) ? 1 : 0;
+			lamp_system.record_occupancy(i, ooo_cpu[i].L2C.MSHR.occupancy, uncore.LLC.MSHR.occupancy, ptw_occ);
 
 			//cout << "Trying to process instr_id: " << ooo_cpu[i].instr_unique_id << " fetch_stall: " << +ooo_cpu[i].fetch_stall;
 			//cout << " stall_cycle: " << stall_cycle[i] << " current: " << current_core_cycle[i] << endl;
@@ -2267,6 +2643,8 @@ int main(int argc, char** argv)
 #endif
 		print_roi_stats(i, &uncore.LLC);
 		cout << "Major fault: " << major_fault[i] << " Minor fault: " << minor_fault[i] << endl;
+		// LAMP: Print comprehensive ROI report for this core (LAMP stats when knob_lamp=1, Baseline Core stats when knob_lamp=0)
+		lamp_system.print_stats(cout, i);
 	}
 
 	for (uint32_t i=0; i<NUM_CPUS; i++) {

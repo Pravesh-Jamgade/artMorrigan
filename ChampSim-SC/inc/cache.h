@@ -2,6 +2,7 @@
 #define CACHE_H
 
 #include "memory_class.h"
+#include "lamp.h"
 #include <map>
 #include <unordered_set>
 #include <iterator>
@@ -21,6 +22,8 @@ enum PTW_LATENCY_MODE { PTW_LATENCY_NONE, PTW_LATENCY_STLB, PTW_LATENCY_L2, PTW_
 #define TRAFFIC_ONLY_PACKETS 0
 #define STLB_ORACLE 0
 #define FLUSH_ON_END 1
+#define DEFAULT_LAMP 0 // Compile-time default for knob_lamp (0 = LAMP disabled, 1 = LAMP enabled; patched by configure_binary.py)
+#define DEFAULT_STLB 1 // Compile-time default for knob_stlb (1 = STLB enabled, 0 = STLB disabled; patched by configure_binary.py)
 extern STLB_BLOCK_MODE stlb_block_mode;
 extern PTW_BOUND_MODE ptw_bound_mode;
 extern PTW_LATENCY_MODE ptw_latency_mode;
@@ -214,6 +217,7 @@ class CACHE : public MEMORY {
 		SectorTracker sector_tracker;
 		uint64_t translation_valid_entries_on_eviction[9];
 		uint64_t translation_valid_footprint_matrix[9][9]; // [valid][footprint] (footprint: 0..8)
+		uint64_t valid_count_zero_events; // Evicted leaf-PTE blocks where translation_entries > 0 but valid_count == 0
 		// Histograms are indexed by footprint - 1. Cache lines contain eight
 		// independently tracked 8-byte entries.
 		uint64_t footprint[4][8], footprint_evictions[4];
@@ -383,6 +387,7 @@ class CACHE : public MEMORY {
 					translation_valid_entries_on_eviction[i] = 0;
 					for (int j = 0; j < 9; ++j) translation_valid_footprint_matrix[i][j] = 0;
 				}
+				valid_count_zero_events = 0;
 				for (int i = 0; i < 6; ++i) {
 					rrc[i] = 0;
 					shadow_stlb_rrc[i] = 0;
@@ -510,7 +515,8 @@ class CACHE : public MEMORY {
 		void handle_fill(),
 		     handle_writeback(),
 		     handle_read(),
-		     handle_prefetch();
+		     handle_prefetch(),
+		     handle_translation_miss(uint32_t index);
 
 		void add_mshr(PACKET *packet),
 		     update_fill_cycle(),
