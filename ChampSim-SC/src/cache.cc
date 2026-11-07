@@ -1611,6 +1611,7 @@ void CACHE::handle_fill()
 
 	void CACHE::flush_stat_counters()
 	{
+		in_flush_on_end = true;
 		for (uint32_t set = 0; set < NUM_SET; ++set) {
 			for (uint32_t way = 0; way < NUM_WAY; ++way) {
 				if (block[set][way].valid)
@@ -1677,6 +1678,7 @@ void CACHE::handle_fill()
 									if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
 								entry.lru = 0;
 							}
+							sector_tracker.record_sector_access(set, block_vpn, 0);
 							return true;
 						}
 					}
@@ -1706,6 +1708,7 @@ void CACHE::handle_fill()
 									if (stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
 								entry.lru = 0;
 							}
+							sector_tracker.record_sector_access(set, block_vpn, 0);
 							return true;
 						}
 					}
@@ -1793,6 +1796,7 @@ void CACHE::handle_fill()
 					}
 				}
 				entry.lru = 0;
+				sector_tracker.record_sector_access(set, block_vpn, hit_where);
 				return;
 			}
 
@@ -1820,6 +1824,14 @@ void CACHE::handle_fill()
 			entry.prefilled_mask = 0;
 			entry.rereference_count = 0;
 			entry.non_compulsory_hit_where = (is_non_compulsory && hit_where >= 2 && hit_where <= 4) ? hit_where : 0;
+
+			// SAFAR Cost Predictor: query prediction at sector installation
+			bool pred = sector_tracker.cost_predictor.predict(block_vpn);
+			entry.predicted_costly = pred;
+			bool valid_source = (hit_where >= 2 && hit_where <= 4);
+			entry.prediction_valid = valid_source;
+			entry.leaf_source = valid_source ? hit_where : 0;
+			sector_tracker.cost_predictor.record_installation(valid_source, block_vpn);
 
 			// Record histogram for hit_where location used as filter source
 			uint8_t hit_loc = (hit_where <= 4) ? hit_where : 4;
@@ -1976,6 +1988,7 @@ void CACHE::handle_fill()
 			for (uint32_t other = 0; other < NUM_WAY; ++other)
 				if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
 			entry.lru = 0;
+			sector_tracker.record_sector_access(set, block_vpn, hit_where);
 			return;
 		}
 
@@ -2018,6 +2031,13 @@ void CACHE::handle_fill()
 			evict_stlb_block(entry);
 		if (existing_way == -1) {
 			entry.non_compulsory_hit_where = (is_non_compulsory && hit_where >= 2 && hit_where <= 4) ? hit_where : 0;
+			// SAFAR Cost Predictor: query prediction at sector installation
+			bool pred = sector_tracker.cost_predictor.predict(block_vpn);
+			entry.predicted_costly = pred;
+			bool valid_source = (hit_where >= 2 && hit_where <= 4);
+			entry.prediction_valid = valid_source;
+			entry.leaf_source = valid_source ? hit_where : 0;
+			sector_tracker.cost_predictor.record_installation(valid_source, block_vpn);
 		} else if (entry.non_compulsory_hit_where == 0 && is_non_compulsory && hit_where >= 2 && hit_where <= 4) {
 			entry.non_compulsory_hit_where = hit_where;
 		}
@@ -2059,6 +2079,7 @@ void CACHE::handle_fill()
 		for (uint32_t other = 0; other < NUM_WAY; ++other)
 			if (other != way && stlb_block[set][other].lru < entry.lru) stlb_block[set][other].lru++;
 		entry.lru = 0;
+		sector_tracker.record_sector_access(set, block_vpn, hit_where);
 	}
 
 	void CACHE::stlb_block_invalidate(uint64_t vpn, uint64_t full_addr)
@@ -2111,6 +2132,29 @@ void CACHE::handle_fill()
 
 	void CACHE::evict_stlb_block(STLB_BLOCK_ENTRY &entry)
 	{
+		// Record sector eviction in per-set reuse distance tracker
+		if (!in_flush_on_end) {
+			sector_tracker.record_sector_eviction(get_set(entry.tag), entry.tag);
+		}
+
+		// SAFAR Cost Predictor: evaluate and train predictor on sector eviction
+		if (!in_flush_on_end && entry.prediction_valid) {
+			if (!entry.accessed_mask) {
+				sector_tracker.cost_predictor.record_skipped_empty();
+			} else {
+				uint32_t fp = 0;
+				for (uint8_t m = entry.accessed_mask; m; m >>= 1)
+					fp += m & 1;
+				uint32_t rrc_idx = get_rrc_bucket_idx(entry.rereference_count);
+				sector_tracker.cost_predictor.train_and_evaluate(
+					entry.tag, entry.predicted_costly, entry.leaf_source, rrc_idx, fp
+				);
+			}
+		}
+		entry.prediction_valid = false;
+		entry.predicted_costly = 0;
+		entry.leaf_source = 0;
+
 		uint8_t mask = entry.accessed_mask;
 		if (!mask) {
 			entry.non_compulsory_hit_where = 0;
@@ -2144,6 +2188,32 @@ void CACHE::handle_fill()
 			shadow_stlb_rrc[bucket]++;
 		}
 		entry.rereference_count = 0;
+	}
+
+	ResidualStats CACHE::get_residual_stlb_stats() const
+	{
+		ResidualStats res;
+		if (stlb_block) {
+			for (uint32_t set = 0; set < NUM_SET; ++set) {
+				for (uint32_t way = 0; way < NUM_WAY; ++way) {
+					const auto &e = stlb_block[set][way];
+					if (e.valid_mask && e.prediction_valid) {
+						res.total++;
+						if (e.predicted_costly) res.pred_costly++;
+						else res.pred_cheap++;
+						if (e.leaf_source == 2) res.leaf_l2++;
+						else if (e.leaf_source == 3) res.leaf_llc++;
+						else if (e.leaf_source == 4) res.leaf_dram++;
+					}
+				}
+			}
+		}
+		return res;
+	}
+
+	void CACHE::record_residual_stats()
+	{
+		sector_tracker.cost_predictor.residual_stats = get_residual_stlb_stats();
 	}
 
 	uint32_t CACHE::get_way(uint64_t address, uint32_t set)

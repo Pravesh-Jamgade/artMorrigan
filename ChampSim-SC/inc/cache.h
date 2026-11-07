@@ -164,7 +164,11 @@ class CACHE : public MEMORY {
 			uint32_t lru, rereference_count;
 			uint8_t valid_mask, accessed_mask, prefilled_mask;
 			uint8_t non_compulsory_hit_where; // 0 = compulsory or L1D/PWC, 2 = L2C, 3 = LLC, 4 = DRAM
-			STLB_BLOCK_ENTRY() : tag(0), lru(0), rereference_count(0), valid_mask(0), accessed_mask(0), prefilled_mask(0), non_compulsory_hit_where(0) {
+			uint8_t predicted_costly : 1;
+			uint8_t prediction_valid : 1;
+			uint8_t leaf_source; // 2: L2, 3: LLC, 4: DRAM
+			STLB_BLOCK_ENTRY() : tag(0), lru(0), rereference_count(0), valid_mask(0), accessed_mask(0), prefilled_mask(0), non_compulsory_hit_where(0),
+			                     predicted_costly(0), prediction_valid(0), leaf_source(0) {
 				for (int i = 0; i < STLB_PTES_PER_BLOCK; ++i) {
 					pte[i] = 0;
 					entry_offset_in_block[i] = 0;
@@ -305,6 +309,8 @@ class CACHE : public MEMORY {
 						stlb_block[i][j].lru = j;
 					}
 				}
+
+				sector_tracker.init_sets(NUM_SET);
 
 				// fctb initialization loop
 				for (uint32_t j=0; j<FCTB_SIZE; j++) {
@@ -479,6 +485,9 @@ class CACHE : public MEMORY {
 		void stlb_block_fill(uint32_t owner_cpu, uint64_t vpn, uint64_t full_addr, uint8_t hit_where = 0, uint8_t is_non_compulsory = 0);
 		void stlb_block_invalidate(uint64_t vpn, uint64_t full_addr=0);
 		void evict_stlb_block(STLB_BLOCK_ENTRY &entry);
+		bool in_flush_on_end = false;
+		ResidualStats get_residual_stlb_stats() const;
+		void record_residual_stats();
 
 		int  add_rq(PACKET *packet),
 		     add_wq(PACKET *packet),

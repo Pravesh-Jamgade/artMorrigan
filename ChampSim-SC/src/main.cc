@@ -46,7 +46,7 @@ void write_csv_stats()
 {
 	ostream& csv = cout;
 	csv << "CSV_STATS_BEGIN\n";
-	csv << fixed << setprecision(2);
+	csv << fixed << setprecision(4);
 	const vector<string> cache_labels{"1", "2", "3", "4", "5", "6", "7", "8"};
 	const vector<string> footprint_names{"load", "rfo", "prefetch", "translation"};
 	const vector<string> rrc_labels{"1", "2", "4", "8", "16", "32"};
@@ -2219,6 +2219,9 @@ int main(int argc, char** argv)
 	elapsed_second -= (elapsed_hour*3600 + elapsed_minute*60);
 
 	cout << endl << "ChampSim completed all CPUs" << endl;
+	for (uint32_t i = 0; i < NUM_CPUS; i++) {
+		ooo_cpu[i].STLB.record_residual_stats();
+	}
 	if (knob_flush_on_end) {
 		for (uint32_t i = 0; i < NUM_CPUS; i++) {
 			ooo_cpu[i].L1D.flush_stat_counters();
