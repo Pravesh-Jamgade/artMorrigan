@@ -5,11 +5,12 @@
 #include "block.h"
 
 // CACHE ACCESS TYPE
-#define LOAD      0
-#define RFO       1
-#define PREFETCH  2
-#define WRITEBACK 3
-#define NUM_TYPES 4
+#define LOAD        0
+#define RFO         1
+#define PREFETCH    2
+#define WRITEBACK   3
+#define TRANSLATION 4
+#define NUM_TYPES   5
 
 extern uint32_t tRP,  // Row Precharge (RP) latency
                 tRCD, // Row address to Column address (RCD) latency

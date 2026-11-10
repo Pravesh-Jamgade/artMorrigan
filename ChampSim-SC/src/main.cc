@@ -68,6 +68,7 @@ void write_csv_stats()
 				"BRANCH_DIRECT_CALL", "BRANCH_INDIRECT_CALL", "BRANCH_RETURN", "BRANCH_OTHER"},
 			ooo_cpu[cpu].total_branch_types);
 
+		const vector<string> access_type_labels{"load", "rfo", "prefetch", "writeback", "translation"};
 		CACHE *reported_levels[] = {&ooo_cpu[cpu].L1D, &ooo_cpu[cpu].L1I, &ooo_cpu[cpu].L2C,
 			&ooo_cpu[cpu].ITLB, &ooo_cpu[cpu].DTLB, &ooo_cpu[cpu].STLB, &uncore.LLC};
 		for (CACHE *level : reported_levels) {
@@ -82,6 +83,9 @@ void write_csv_stats()
 			csv << level->NAME << ',' << cpu << ',' << accesses << ',' << hits << ',' << misses << ','
 				<< (instructions == 0 ? 0.0 : 1000.0 * misses / instructions) << ','
 				<< (accesses == 0 ? 0.0 : 100.0 * misses / accesses) << '\n';
+			write_csv_vector(csv, prefix + level->NAME + "_accesses_by_type", access_type_labels, level->roi_access[cpu]);
+			write_csv_vector(csv, prefix + level->NAME + "_hits_by_type", access_type_labels, level->roi_hit[cpu]);
+			write_csv_vector(csv, prefix + level->NAME + "_misses_by_type", access_type_labels, level->roi_miss[cpu]);
 			if (level->cache_type != IS_LLC)
 				write_csv_vector(csv, prefix + level->NAME + "_rrc", rrc_labels, level->rrc);
 		}
@@ -442,6 +446,9 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
 	cout << " WRITEBACK ACCESS: " << setw(10) << cache->roi_access[cpu][3] << "  HIT: " << setw(10) << cache->roi_hit[cpu][3] << "  MISS: " << setw(10) << cache->roi_miss[cpu][3] << endl;
 
 	cout << cache->NAME;
+	cout << " TRANSLATION ACCESS: " << setw(8) << cache->roi_access[cpu][4] << "  HIT: " << setw(10) << cache->roi_hit[cpu][4] << "  MISS: " << setw(10) << cache->roi_miss[cpu][4] << endl;
+
+	cout << cache->NAME;
 	cout << " PREFETCH  REQUESTED: " << setw(10) << cache->pf_requested << "  ISSUED: " << setw(10) << cache->pf_issued;
 	cout << "  USEFUL: " << setw(10) << cache->pf_useful << "  USELESS: " << setw(10) << cache->pf_useless << endl;
 
@@ -566,6 +573,9 @@ void print_sim_stats(uint32_t cpu, CACHE *cache)
 
 	cout << cache->NAME;
 	cout << " WRITEBACK ACCESS: " << setw(10) << cache->sim_access[cpu][3] << "  HIT: " << setw(10) << cache->sim_hit[cpu][3] << "  MISS: " << setw(10) << cache->sim_miss[cpu][3] << endl;
+
+	cout << cache->NAME;
+	cout << " TRANSLATION ACCESS: " << setw(8) << cache->sim_access[cpu][4] << "  HIT: " << setw(10) << cache->sim_hit[cpu][4] << "  MISS: " << setw(10) << cache->sim_miss[cpu][4] << endl;
 }
 
 void print_branch_stats()
@@ -1311,6 +1321,22 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 		bool ptw_canceled_early = false;                                           // True if LAMP completes and cancels an upper PTW level (lvl >= 1)
 		int ptw_cancel_lvl = -1;                                                   // Upper PTW level (3=PML4, 2=PDP, 1=PD) where PTW was canceled
 
+		// Helper lambda: Records a PTW or LAMP cache access in the TRANSLATION type bucket
+		// (keeping the packet/replacement type as LOAD so prefetchers are never disturbed)
+		auto record_translation_cache_access = [&](CACHE &cache, bool is_hit) {
+			if (!magic) {
+				cache.sim_access[cpu][TRANSLATION]++;
+				cache.ACCESS[TRANSLATION]++;
+				if (is_hit) {
+					cache.sim_hit[cpu][TRANSLATION]++;
+					cache.HIT[TRANSLATION]++;
+				} else {
+					cache.sim_miss[cpu][TRANSLATION]++;
+					cache.MISS[TRANSLATION]++;
+				}
+			}
+		};
+
 		if (knob_lamp && !magic && !asap && ideal != 1) {
 			// Instantiate shared transaction linking LAMP_PATH and PTW_PATH
 			tx = lamp_system.start_transaction(cpu, instr_id, va, unique_vpage, ip, type, is_itlb,
@@ -1339,6 +1365,12 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 					stats_side.lamp_miss++;                                        // Leaf-PTE block absent from L1D/L2C/LLC (stops at LLC, never DRAM)
 				tx->lamp_usable = false;
 				tx->lamp_ready_cycle = UINT64_MAX;
+				// Record LAMP's cycle-0 parallel probe misses across L1D (if PTW_START_LEVEL == 1), L2C, and LLC
+				// (the subsequent PTW walk to DRAM will record PTW's own lvl == 0 accesses below)
+				if (PTW_START_LEVEL == 1)
+					record_translation_cache_access(ooo_cpu[cpu].L1D, false);
+				record_translation_cache_access(ooo_cpu[cpu].L2C, false);
+				record_translation_cache_access(uncore.LLC, false);
 			}
 		}
 
@@ -1394,6 +1426,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 					way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
 					if (way_read >= 0) {
+						record_translation_cache_access(ooo_cpu[cpu].L1D, true);
 						if (lvl == 0) search_packet.hit_where = 1;
 						level_target_fill[lvl] = FILL_L1;
 						ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, addr, stat_idx);
@@ -1405,6 +1438,8 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 						cstall += l1_probe_lat;
 						arch_ptw_cstall += l1_probe_lat;
 					} else {
+						if (PTW_START_LEVEL == 1)
+							record_translation_cache_access(ooo_cpu[cpu].L1D, false);
 						cstall += l1_probe_lat;
 						arch_ptw_cstall += l1_probe_lat;
 
@@ -1453,6 +1488,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 						way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 
 						if (way_read >= 0) {
+							record_translation_cache_access(ooo_cpu[cpu].L2C, true);
 							if (lvl == 0) {
 								search_packet.hit_where = 2;
 								if (is_non_compulsory)
@@ -1468,6 +1504,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 							cstall += L2C_LATENCY;
 							arch_ptw_cstall += L2C_LATENCY;
 						} else {
+							record_translation_cache_access(ooo_cpu[cpu].L2C, false);
 							cstall += L2C_LATENCY;
 							arch_ptw_cstall += L2C_LATENCY;
 
@@ -1513,6 +1550,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 							way_read = uncore.LLC.check_hit(&search_packet);
 
 							if (way_read >= 0) {
+								record_translation_cache_access(uncore.LLC, true);
 								if (lvl == 0) 
 								{
 									search_packet.hit_where = 3;
@@ -1530,6 +1568,7 @@ VA_TO_PA_RESULT va_to_pa(uint32_t cpu, uint64_t instr_id, uint64_t va, uint64_t 
 								cstall += LLC_LATENCY;
 								arch_ptw_cstall += LLC_LATENCY;
 							} else {
+								record_translation_cache_access(uncore.LLC, false);
 								// If an upper PTW level (lvl > 0) missed in LLC and LAMP already completed during the LLC probe,
 								// cancel before allocating an LLC victim or issuing a 200-cycle DRAM read
 								if (lvl > 0 && knob_lamp && !magic && lamp_found && (arch_ptw_cstall + LLC_LATENCY) >= lamp_arch_lat) {
@@ -1844,6 +1883,18 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 		int way_read;
 		PACKET search_packet;
 
+		auto record_translation_cache_access = [&](CACHE &cache, bool is_hit) {
+			cache.sim_access[cpu][TRANSLATION]++;
+			cache.ACCESS[TRANSLATION]++;
+			if (is_hit) {
+				cache.sim_hit[cpu][TRANSLATION]++;
+				cache.HIT[TRANSLATION]++;
+			} else {
+				cache.sim_miss[cpu][TRANSLATION]++;
+				cache.MISS[TRANSLATION]++;
+			}
+		};
+
 		for (int lvl = walk_depth - 1; lvl >= 0; --lvl) {
 			int mapped_mmu_idx = -1;
 			if (lvl > 0 && lvl >= walk_depth - 3) {
@@ -1867,30 +1918,37 @@ int mmu_cache_prefetch_search(uint32_t cpu, uint64_t vpage, int swap, uint64_t i
 				way_read = PTW_START_LEVEL == 1 ? ooo_cpu[cpu].L1D.check_hit(&search_packet) : -1;
 
 				if (way_read >= 0) {
+					record_translation_cache_access(ooo_cpu[cpu].L1D, true);
 					ooo_cpu[cpu].L1D.mark_translation_access(set, way_read, addr, stat_idx);
 					if (lvl != 0 || iflag) ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][0]++;
 					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
 				} else {
+					if (PTW_START_LEVEL == 1)
+						record_translation_cache_access(ooo_cpu[cpu].L1D, false);
 					cstall += PTW_START_LEVEL == 1 ? L1D_LATENCY : 0;
 					
 					set = ooo_cpu[cpu].L2C.get_set(addr >> LOG2_BLOCK_SIZE);
 					way_read = ooo_cpu[cpu].L2C.check_hit(&search_packet);
 
 					if (way_read >= 0) {
+						record_translation_cache_access(ooo_cpu[cpu].L2C, true);
 						ooo_cpu[cpu].L2C.mark_translation_access(set, way_read, addr, stat_idx);
 						if (lvl != 0 || iflag) ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][1]++;
 						cstall += L2C_LATENCY;
 					} else {
+						record_translation_cache_access(ooo_cpu[cpu].L2C, false);
 						cstall += L2C_LATENCY;
 
 						set = uncore.LLC.get_set(addr >> LOG2_BLOCK_SIZE);
 						way_read = uncore.LLC.check_hit(&search_packet);
 
 						if (way_read >= 0) {
+							record_translation_cache_access(uncore.LLC, true);
 							uncore.LLC.mark_translation_access(set, way_read, addr, stat_idx);
 							if (lvl != 0 || iflag) ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][2]++;
 							cstall += LLC_LATENCY;
 						} else {
+							record_translation_cache_access(uncore.LLC, false);
 							cstall += LLC_LATENCY;
 							cstall += 200;
 							if (lvl != 0 || iflag) ooo_cpu[cpu].STLB.pagetable_mr_hit_ratio[stat_idx][3]++;

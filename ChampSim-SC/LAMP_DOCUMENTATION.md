@@ -174,10 +174,13 @@ Per-side (`<p>` = `Core_<cpu>_<ITLB|DTLB>_`) and Core-wide (`Core_<cpu>_`):
 - `<p>avg_lamp_lookup_latency`: Average latency of winning LAMP leaf-PTE lookups.
 - `<p>avg_ptw_walk_latency`: Average latency of un-canceled 4-level PTW walks.
 
-### 6. Cache Pollution by Leaf PTEs (`Core_<cpu>_`)
+### 6. Cache Pollution by Leaf PTEs & Translation Cache Access Accounting (`Core_<cpu>_`)
 - `Core_<cpu>_leaf_pte_data_evictions`: Count of valid non-PTE data cache blocks displaced by leaf-PTE fills in L1D/L2C/LLC.
 - `Core_<cpu>_leaf_pte_evictions`: Count of leaf-PTE cache blocks evicted from L1D/L2C/LLC.
 - `Core_<cpu>_leaf_pte_pollution_misses`: Count of subsequent demand data (`LOAD`/`RFO`) misses on cache blocks that were earlier displaced by leaf-PTE fills.
+- **Translation Cache Access Accounting (`TRANSLATION` Type)**:
+  - All PTW and LAMP cache probes in `L1D`, `L2C`, and `LLC` keep their packet/replacement type as `LOAD` so hardware prefetchers and replacement policies are never disturbed, while recording cache access/hit/miss statistics in `TRANSLATION` (`index 4` in `sim_access`, `sim_hit`, `sim_miss`, `roi_access`, `roi_hit`, `roi_miss`).
+  - Included in `TOTAL ACCESS / HIT / MISS` and printed separately as `<CACHE> TRANSLATION ACCESS: ... HIT: ... MISS: ...` in stdout and `Core_<cpu>_<CACHE>_{accesses,hits,misses}_by_type` (`load,rfo,prefetch,writeback,translation`) in CSV.
 
 ### 7. ROB & Pipeline Stall Metrics (`Core_<cpu>_`)
 - `Core_<cpu>_rob_head_translation_wait_cycles`: Cycles where the ROB head memory instruction is waiting strictly for address translation.
@@ -192,6 +195,23 @@ To ensure warmup phase activity does not pollute the Region-of-Interest (ROI) me
 - When all cores complete `warmup_instructions`, ChampSim calls [`finish_warmup()`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/main.cc#L758-L802).
 - Inside `finish_warmup()`, [`lamp_system.reset_stats()`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/lamp.cc#L73-L81) is invoked.
 - `reset_stats()` clears all accumulated ITLB/DTLB counts, histograms, ROB wait cycles, queue wait cycles, cache access counts, and in-flight tracking tables so reported statistics strictly capture post-warmup execution.
+
+---
+
+### Page Fault Behavior (Major vs. Minor Page Faults)
+
+In [`va_to_pa()`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/main.cc#L1080-L1265), page faults are classified into **Major Page Faults** (`swap == 1`) and **Minor Page Faults** (`swap == 0`, first touch of an unmapped virtual page):
+
+1. **Major Page Fault (`allocated_pages >= DRAM_PAGES`, `swap == 1`)**:
+   - **Victim Eviction & Shootdown** ([`main.cc:1083-1144`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/main.cc#L1083-L1144)): An NRU victim page (`NRU_vpage`) is replaced in `page_table` and `inverse_table`, its cache lines are invalidated across `ITLB`, `DTLB`, `STLB`, `L1I`, `L1D`, `L2C`, and `LLC`, and [`lamp_system.invalidate_leaf_cache(cpu, NRU_vpage)`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/lamp.cc#L411-L468) clears the victim slot's valid bit (`leaf_pte_valid &= ~(1 << pte_offset)`) and PPN (`leaf_ptes[pte_offset] = 0`) in `L1D`, `L2C`, and `LLC` (invalidating the cache block if all 8 sibling slots become `0`).
+   - **LAMP Bypassed & Swap Stall Applied** ([`main.cc:1255-1265`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/main.cc#L1255-L1265)): `major_fault[cpu]++` is incremented, `if (swap)` is taken so **LAMP is not launched**, the core stalls for `SWAP_LATENCY` (`100,000` cycles), and the fill is attributed to PTW/OS (`tlb_filled_by_ptw++`).
+
+2. **Minor Page Fault (`pr == page_table.end()`, `allocated_pages < DRAM_PAGES`, `swap == 0`)**:
+   - **Cold 64B Leaf-PTE Group (No sibling page in `vpn >> 3` is cached)**: `page_table` maps `vpage -> random_ppage` and increments `minor_fault[cpu]++`. [`lamp_system.lookup_leaf_cache()`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/lamp.cc#L208-L312) misses in `L1D`, `L2C`, and `LLC` (`lamp_miss++`) and stops at `LLC` (never goes to DRAM). The conventional PTW walks all 4 levels (`PML4 -> PDP -> PD -> Leaf`), fetches the 64B leaf-PTE block from DRAM, installs it into `LLC` and `L2C` (and `L1D` if `ptw_start_level = l1`), and [`lamp_system.fill_leaf_cache()`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/lamp.cc#L316-L407) tags the cache block with `pte_group = vpn >> 3`.
+   - **Warm 64B Leaf-PTE Group (A sibling page in `vpn >> 3` was already walked and cached)**:
+     > [!NOTE]
+     > **Design Note for Future Reference (Inherited Morrigan / Baseline ChampSim Behavior):**
+     > Because the underlying Morrigan / ChampSim codebase allocates the `vpage -> ppage` mapping in `page_table` at the top of `va_to_pa()` ([`main.cc:1168`](file:///media/pravesh/Storage/code/sims/artMorrigan/ChampSim-SC/src/main.cc#L1168)) *before* the page table walk and models the 64B leaf PT line (`level_addrs[0] >> 6`) as containing all 8 sibling PTEs (`leaf_pte_valid = 0xFF`), a first-time access to a sibling page whose 64B leaf-PTE block is already resident in `L1D`/`L2C`/`LLC` hits in cache in both baseline PTW (`lvl == 0`) and LAMP. This behavior is intentionally preserved for consistency with the Morrigan baseline. If strict first-touch minor-fault modeling is desired in the future, `fill_leaf_cache()` can set `leaf_pte_valid` bits only for sibling pages already present in `page_table` prior to the fault.
 
 ---
 
